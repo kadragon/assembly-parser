@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>의사중계 구간 요약</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #fff; --text: #1d2330; --muted: #6b7280; --line: #e3e6eb; --accent: #1f5fbf; --err: #b42318;
+    --member: #0b7a57; --member-bg: #e3f5ee; --inst: #6b3fb5; --inst-bg: #efe8fb; --warn: #9a5b00; --warn-bg: #fdf0d9; --err-bg: #fde7e5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #14171c; --card: #1c2027; --text: #e6e8ec; --muted: #9aa3af; --line: #2c323b; --accent: #7aa7ff; --err: #ff8a80; --member: #6fd6ad; --member-bg: #15372b; --inst: #c3a6ff; --inst-bg: #2c2342; --warn: #f5c36b; --warn-bg: #3a2c12; --err-bg: #3d1d1b; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 "Pretendard Variable", Pretendard, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
+  /* no bottom padding on main: the sticky side panel is bounded by .layout, so trailing space would push it up */
+  main { max-width: 1440px; margin: 0 auto; padding: 24px 24px 0; }
+  #windows { padding-bottom: 48px; }
+  header { margin-bottom: 8px; }
+  header h1 { font-size: 20px; margin: 0 0 4px; }
+  header p { margin: 0; color: var(--muted); }
+  .layout { display: grid; grid-template-columns: 3fr 2fr; gap: 24px; align-items: start; }
+  /* right column stays in view while the window list scrolls */
+  .side { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow-y: auto; padding-right: 4px; }
+  @media (max-width: 900px) {
+    main { padding: 16px 16px 48px; }
+    .layout { grid-template-columns: 1fr; }
+    .side { position: static; max-height: none; overflow: visible; order: -1; }
+  }
+  h2 { font-size: 15px; color: var(--muted); font-weight: 600; margin: 24px 0 12px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; margin-bottom: 12px; }
+  .time { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--accent); }
+  .meta { color: var(--muted); font-size: 13px; margin-left: 8px; }
+  .summary ul { margin: 8px 0 0; padding-left: 20px; }
+  .summary p { margin: 8px 0 0; }
+  .until { font-weight: 500; font-size: 13px; margin-left: 4px; font-variant-numeric: tabular-nums; }
+  .error { color: var(--err); }
+  #live { max-height: 240px; overflow-y: auto; font-size: 14px; }
+  #live p { display: grid; grid-template-columns: 56px 1fr; gap: 10px; margin: 0 0 4px; }
+  #live p.empty { display: block; }
+  #live time { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; padding-top: 2px; }
+  /* the STT server marks a speaker change with a leading "-" */
+  #live p.turn { border-top: 1px dashed var(--line); padding-top: 6px; margin-top: 8px; }
+  #live p.turn:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
+  .empty { color: var(--muted); }
+  li.sub { margin-left: 20px; list-style: circle; }
+  .group + .group { margin-top: 8px; }
+  .group h2 { display: flex; align-items: baseline; gap: 8px; }
+  .group.primary h2 { color: var(--accent); }
+  .topic-list { background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .group.primary .topic-list { border-left: 4px solid var(--accent); }
+  .topic-row { display: flex; width: 100%; align-items: baseline; gap: 8px; padding: 11px 16px; border: 0; border-top: 1px solid var(--line); background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+  .topic-row:first-child { border-top: 0; }
+  .topic-row:hover, .topic-row[aria-expanded="true"] { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+  .topic-row .title { flex: 1; font-weight: 600; }
+  .topic-row .meta { margin: 0; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .topic-row .chev { color: var(--muted); transition: transform .15s; }
+  .topic-row[aria-expanded="true"] .chev { transform: rotate(90deg); }
+  .topic-detail { padding: 4px 16px 16px; border-top: 1px dashed var(--line); }
+  .topic-detail .desc { color: var(--muted); font-size: 14px; margin: 8px 0 0; }
+  .topic-detail h3 { font-size: 13px; color: var(--muted); font-weight: 600; margin: 14px 0 0; }
+  .entry { margin-top: 10px; }
+  .entry .time { font-size: 13px; }
+  .tag { display: inline-block; font-size: 12px; font-weight: 600; color: var(--accent); margin-right: 4px; }
+  .badge { display: inline-block; font-size: 12px; font-weight: 600; color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 0 8px; margin: 2px 4px 0 0; background: none; font-family: inherit; cursor: pointer; }
+  .badge.other { color: var(--muted); border-color: var(--line); }
+  /* who asked / which institution: filled pills, distinct from the outlined topic chips */
+  .pill { display: inline-block; font-size: 12px; font-weight: 600; line-height: 18px; border-radius: 4px; padding: 0 6px; margin: 2px 4px 0 0; white-space: nowrap; }
+  .pill.member { color: var(--member); background: var(--member-bg); }
+  .pill.inst { color: var(--inst); background: var(--inst-bg); }
+  .pills { display: block; margin-top: 2px; }
+  .topic-row .title .pills { font-weight: 400; }
+  .entry .pills { display: inline; margin-left: 6px; }
+  .bullets { margin: 8px 0 0; padding-left: 20px; }
+  .bullets li { margin-top: 4px; }
+  .bullets .pill { margin: 0 4px 0 0; }
+  .chips { margin-top: 10px; }
+  .status { margin: 8px 0 0; font-size: 13px; color: var(--accent); display: flex; align-items: center; gap: 8px; }
+  .status[hidden] { display: none; }
+  .spinner { width: 12px; height: 12px; border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; flex: none; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .pending { color: var(--muted); display: flex; align-items: center; gap: 8px; }
+  details { margin-top: 10px; border-top: 1px dashed var(--line); padding-top: 8px; }
+  summary { cursor: pointer; color: var(--accent); font-size: 14px; }
+  /* member/institution pills double as filters */
+  .pill[data-filter] { cursor: pointer; }
+  .pill[data-filter]:hover { filter: brightness(.95); text-decoration: underline; }
+  .pill.active { outline: 2px solid currentColor; outline-offset: -1px; }
+  .filter { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; padding: 8px 12px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; font-size: 14px; }
+  .filter[hidden] { display: none; }
+  .filter .pill { margin: 0; }
+  .filter button { font: inherit; font-size: 13px; color: var(--accent); background: none; border: 0; cursor: pointer; padding: 0; }
+  .feed { font-size: 13px; color: var(--muted); margin-left: 8px; font-variant-numeric: tabular-nums; }
+  .feed::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--member); margin-right: 6px; vertical-align: 1px; }
+  .feed.stale { color: var(--err); }
+  .feed.stale::before { background: var(--err); }
+  .mark { font-size: 11px; font-weight: 700; border-radius: 4px; padding: 0 5px; margin-left: 6px; vertical-align: 1px; color: #fff; background: var(--accent); }
+  .mark.updated { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+  .topic-row.minor .title { font-weight: 400; color: var(--muted); }
+  .badge .who { color: var(--member); font-weight: 500; }
+  /* fact checks: verdict chip, explanation, both sides when disputed, source links */
+  .checks { list-style: none; margin: 8px 0 0; padding: 0; }
+  .check { margin-top: 10px; padding-left: 10px; border-left: 3px solid var(--line); }
+  .check .claim { font-weight: 600; }
+  .check .why { color: var(--muted); font-size: 14px; margin-top: 2px; }
+  .verdict { display: inline-block; font-size: 12px; font-weight: 700; line-height: 18px; border-radius: 4px; padding: 0 6px; margin-right: 6px; color: var(--muted); background: color-mix(in srgb, var(--muted) 14%, transparent); }
+  .verdict.v-true { color: var(--member); background: var(--member-bg); }
+  .verdict.v-partial { color: var(--warn); background: var(--warn-bg); }
+  .verdict.v-false { color: var(--err); background: var(--err-bg); }
+  .verdict.v-disputed { color: var(--inst); background: var(--inst-bg); }
+  .sides { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; margin-top: 6px; }
+  .side { font-size: 14px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+  .side strong { display: block; font-size: 12px; color: var(--inst); }
+  .sources { font-size: 12px; margin-top: 4px; overflow-wrap: anywhere; }
+  .sources a { color: var(--accent); margin-right: 8px; }
+  .more { font: inherit; font-size: 13px; color: var(--accent); background: none; border: 0; padding: 0; margin-top: 6px; cursor: pointer; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1 id="subject">불러오는 중…</h1>
+    <p><span id="committee"></span><span id="feed" class="feed stale">자막 없음</span></p>
+    <p class="status" id="status" hidden><span class="spinner"></span><span id="status-text"></span></p>
+    <div class="filter" id="filter" hidden></div>
+  </header>
+
+  <div class="layout">
+    <div>
+      <h2>진행 중인 구간 <span id="current-time" class="time"></span></h2>
+      <div class="card" id="live"><p class="empty">아직 자막이 없습니다.</p></div>
+
+      <h2 id="summaries-title">구간 요약</h2>
+      <div id="windows"><p class="empty">구간이 끝나면 요약이 표시됩니다.</p></div>
+    </div>
+
+    <aside class="side" id="topics">
+      <h2>주제별 정리</h2>
+      <p class="empty">첫 구간이 끝나면 주제가 표시됩니다.</p>
+    </aside>
+  </div>
+</main>
+<script>
+  const fmt = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false });
+  const clock = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  const range = (s, e) => `${fmt.format(s)}–${fmt.format(e)}`;
+  const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  // Minimal markdown: **bold**, "- " bullets, paragraphs.
+  function md(text) {
+    let html = '', inList = false;
+    for (const raw of text.split('\n')) {
+      const line = esc(raw.trim()).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+      if (!line) continue;
+      if (/^[-*] /.test(raw.trim())) {
+        if (!inList) { html += '<ul>'; inList = true; }
+        const nested = /^\s{2,}/.test(raw);
+        const body = line.slice(2).replace(/^\[([^\]]{1,4})\]\s*/, '<span class="tag">$1</span>');
+        html += `<li${nested ? ' class="sub"' : ''}>${body}</li>`;
+      } else {
+        if (inList) { html += '</ul>'; inList = false; }
+        html += `<p>${line}</p>`;
+      }
+    }
+    return html + (inList ? '</ul>' : '');
+  }
+
+  // Live subtitles for the current window. Seeded by /api/state, then pushed
+  // line by line from /api/live as the collector appends to the transcript.
+  const live = { start: 0, end: 0, windowMs: 0, lines: new Map() };
+
+  function rollTo(start) {
+    live.start = start;
+    live.end = start + live.windowMs;
+    live.lines.clear();
+    document.getElementById('current-time').textContent = range(live.start, live.end);
+  }
+
+  function addLiveLine(line) {
+    if (!live.windowMs || line.ts < live.start) return;
+    if (line.ts >= live.end) rollTo(Math.floor(line.ts / live.windowMs) * live.windowMs);
+    const prev = live.lines.get(line.key);
+    // a later final for the same segment replaces the text but keeps its position
+    live.lines.set(line.key, prev ? { ...line, ts: prev.ts } : line);
+  }
+
+  function renderLive() {
+    const el = document.getElementById('live');
+    const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 8;
+    const lines = [...live.lines.values()].sort((a, b) => a.ts - b.ts);
+    // one row per sub-line; the time is shown on the first row of each caption
+    el.innerHTML = lines.length
+      ? lines.flatMap((l) => l.text.split('\n').map((part, i) => {
+          const turn = /^-\s*/.test(part);
+          return `<p${turn ? ' class="turn"' : ''}><time>${i === 0 ? clock.format(l.ts) : ''}</time><span>${esc(part.replace(/^-\s*/, ''))}</span></p>`;
+        })).join('')
+      : '<p class="empty">아직 자막이 없습니다.</p>';
+    if (atBottom) el.scrollTop = el.scrollHeight;
+  }
+
+  const stream = new EventSource('/api/live');
+  stream.onmessage = (e) => {
+    lastLineAt = Date.now();
+    addLiveLine(JSON.parse(e.data));
+    renderLive();
+  };
+
+  // Caption feed health: collect.js runs separately, so show how long since the last caption.
+  let lastLineAt = null;
+  function renderFeed() {
+    const el = document.getElementById('feed');
+    if (!lastLineAt) return;
+    const sec = Math.max(0, Math.round((Date.now() - lastLineAt) / 1000));
+    const stale = sec >= 60;
+    el.className = `feed${stale ? ' stale' : ''}`;
+    el.textContent = stale ? `자막 ${Math.floor(sec / 60)}분째 없음` : `자막 수신 ${sec}초 전`;
+    el.title = stale ? '정회 중이거나 수집(collect)이 멈췄을 수 있습니다' : '';
+  }
+  setInterval(renderFeed, 1000);
+
+  // Tab title counts topic changes that happened while the tab was in the background.
+  let subject = '';
+  let hiddenChanges = 0;
+  const updateTitle = () => { document.title = `${hiddenChanges ? `(${hiddenChanges}) ` : ''}${subject} 요약`; };
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    hiddenChanges = 0;
+    updateTitle();
+  });
+
+  async function refresh() {
+    const res = await fetch('/api/state');
+    const s = await res.json();
+    subject = s.meeting.subject;
+    updateTitle();
+    if (s.lastLineAt) lastLineAt = Math.max(lastLineAt ?? 0, s.lastLineAt);
+    renderFeed();
+    document.getElementById('subject').textContent = s.meeting.subject;
+    document.getElementById('committee').textContent = `${s.meeting.committee} · ${s.meeting.date}`;
+    document.getElementById('summaries-title').textContent = `${s.windowMinutes}분 구간 요약`;
+
+    live.windowMs = s.windowMinutes * 60_000;
+    if (s.current.start > live.start) rollTo(s.current.start);
+    // also covers lines that arrived while the event stream was reconnecting
+    for (const line of s.current.lines) addLiveLine(line);
+    renderLive();
+
+    renderStatus(s.running ?? []);
+    renderTopics(s);
+    renderWindows(s);
+    renderFilter(s);
+  }
+
+  function renderStatus(running) {
+    const el = document.getElementById('status');
+    el.hidden = !running.length;
+    if (!running.length) return;
+    const elapsed = Math.round((Date.now() - Math.min(...running.map((r) => r.since))) / 1000);
+    document.getElementById('status-text').textContent =
+      `처리 중 (${running.length}건, ${elapsed}초째): ${running.map((r) => r.job).join(', ')}`;
+  }
+
+  // Topics: only titles are shown until one is selected; one open at a time.
+  let selected = null;
+  try { selected = localStorage.getItem('topic'); } catch {}
+  let lastTopics = '';
+  let topicsById = new Map();
+
+  function select(id) {
+    selected = selected === id ? null : id;
+    try { selected ? localStorage.setItem('topic', selected) : localStorage.removeItem('topic'); } catch {}
+    lastTopics = '';
+    refresh().catch(console.error);
+  }
+
+  // Filter by one member or institution: { kind: 'member' | 'inst', value }.
+  let filter = null;
+  try { filter = JSON.parse(localStorage.getItem('filter')); } catch {}
+  const filterField = { member: 'members', inst: 'institutions' };
+  const matches = (entries) => !filter || entries.some((e) => (e[filterField[filter.kind]] ?? []).includes(filter.value));
+
+  function setFilter(next) {
+    filter = next && !(filter && filter.kind === next.kind && filter.value === next.value) ? next : null;
+    try { filter ? localStorage.setItem('filter', JSON.stringify(filter)) : localStorage.removeItem('filter'); } catch {}
+    lastTopics = '';
+    refresh().catch(console.error);
+  }
+
+  // "New"/"updated" marks: what this viewer last saw of each topic; cleared by opening the topic.
+  const sig = (t) => `${t.entries.length}:${t.summary?.until ?? ''}:${t.factcheck?.checks.length ?? 0}`;
+  let seen = null, seenKey = '';
+  let prevSigs = null;
+  function markOf(t) {
+    if (t.id === selected && seen[t.id] !== sig(t)) {
+      seen[t.id] = sig(t);
+      try { localStorage.setItem(seenKey, JSON.stringify(seen)); } catch {}
+    }
+    if (!(t.id in seen)) return '<span class="mark">새로</span>';
+    return seen[t.id] !== sig(t) ? '<span class="mark updated">갱신</span>' : '';
+  }
+
+  // procedural chatter ("회의 진행") goes last and is dimmed
+  const isMinor = (t) => t.title === '회의 진행';
+
+  function renderTopics(s) {
+    const key = JSON.stringify([s.topics, s.topicsUntil, selected, filter]);
+    if (key === lastTopics) return; // avoid re-rendering (and losing scroll) when nothing changed
+    lastTopics = key;
+    topicsById = new Map(s.topics.map((t) => [t.id, t]));
+
+    if (!seen) {
+      seenKey = `seen:${s.meeting.subject}:${s.meeting.date}`;
+      try { seen = JSON.parse(localStorage.getItem(seenKey)); } catch {}
+      // first visit: everything already on screen counts as seen
+      if (!seen) {
+        seen = Object.fromEntries(s.topics.map((t) => [t.id, sig(t)]));
+        try { localStorage.setItem(seenKey, JSON.stringify(seen)); } catch {}
+      }
+    }
+    const sigs = new Map(s.topics.map((t) => [t.id, sig(t)]));
+    if (prevSigs && document.hidden) hiddenChanges += [...sigs].filter(([id, v]) => prevSigs.get(id) !== v).length;
+    prevSigs = sigs;
+    updateTitle();
+
+    const lastSeen = (t) => t.entries.at(-1)?.end ?? t.created;
+    const until = s.topicsUntil ? ` · ${fmt.format(s.topicsUntil)}까지` : '';
+    const groups = s.categories.map((cat, i) => {
+      const list = s.topics.filter((t) => t.category === cat && matches(t.entries))
+        .sort((a, b) => isMinor(a) - isMinor(b) || lastSeen(b) - lastSeen(a));
+      const rows = list.map((t) => {
+        const open = t.id === selected;
+        return `
+          <button class="topic-row${isMinor(t) ? ' minor' : ''}" data-topic="${t.id}" aria-expanded="${open}">
+            <span class="chev">›</span><span class="title">${esc(t.title)}${markOf(t)}<span class="pills">${pills(...topicPeople(t.entries))}</span></span>
+            <span class="meta">기록 ${t.entries.length}${t.factcheck?.checks.length ? ` · 검증 ${t.factcheck.checks.length}` : ''} · 최근 ${fmt.format(lastSeen(t))}</span>
+          </button>
+          ${open ? topicDetail(t) : ''}`;
+      }).join('');
+      const none = filter ? '해당하는 주제가 없습니다.' : '아직 주제가 없습니다.';
+      return `
+        <section class="group${i === 0 && s.categories.length > 1 ? ' primary' : ''}">
+          <h2>${esc(cat)} <span class="meta">주제 ${list.length}개${until}</span></h2>
+          <div class="topic-list">${rows || `<p class="empty" style="margin:0;padding:12px 16px">${none}</p>`}</div>
+        </section>`;
+    }).join('');
+    document.getElementById('topics').innerHTML = groups || '<h2>주제별 정리</h2><p class="empty">첫 구간이 끝나면 주제가 표시됩니다.</p>';
+  }
+
+  function renderFilter(s) {
+    const el = document.getElementById('filter');
+    el.hidden = !filter;
+    if (!filter) return;
+    const topics = s.topics.filter((t) => matches(t.entries)).length;
+    const windows = s.windows.filter((w) => matches(windowEntries(w))).length;
+    el.innerHTML = `<span>필터</span>${pill(filter.kind, filter.value)}<span class="meta" style="margin:0">주제 ${topics}개 · 구간 ${windows}개</span><button data-clear-filter>✕ 해제 (Esc)</button>`;
+  }
+
+  // Member and institution pills. Institutions first: "which school" is read before "who asked".
+  function pill(kind, value) {
+    const on = filter && filter.kind === kind && filter.value === value;
+    const text = kind === 'member' ? `${value} 위원` : value;
+    return `<span class="pill ${kind}${on ? ' active' : ''}" data-filter="${kind}" data-value="${esc(value)}" title="${on ? '필터 해제' : '이 항목만 보기'}">${esc(text)}</span>`;
+  }
+  function pills(members = [], institutions = []) {
+    return [...institutions.map((i) => pill('inst', i)), ...members.map((m) => pill('member', m))].join('');
+  }
+  // this window's entries across its topics
+  const windowEntries = (w) => (w.topics ?? []).map((id) => topicsById.get(id)?.entries.find((e) => e.start === w.start)).filter(Boolean);
+  const uniq = (xs) => [...new Set(xs)];
+  const topicPeople = (entries) => [uniq(entries.flatMap((e) => e.members ?? [])), uniq(entries.flatMap((e) => e.institutions ?? []))];
+
+  // hideInst: the topic has a single institution, already shown on its row
+  function summaryHtml(sum, hideInst = false) {
+    if (!sum.bullets) return md(sum.text ?? '');
+    const items = sum.bullets.map((b) => `
+      <li><span class="tag">${esc(b.tag)}</span>${pills(b.member ? [b.member] : [], b.institution && !hideInst ? [b.institution] : [])}${esc(b.text)}</li>`).join('');
+    return `<p><strong>핵심</strong>: ${esc(sum.core)}</p><ul class="bullets">${items}</ul>`;
+  }
+
+  const verdictClass = { '사실': 'v-true', '대체로 사실': 'v-true', '일부 사실': 'v-partial', '사실 아님': 'v-false', '논쟁 중': 'v-disputed' };
+  // links are http(s)-only (filtered in summarize), escaped here as well
+  const sources = (list) => list.length
+    ? `<div class="sources">출처 ${list.map((x) => `<a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.title)}</a>`).join('')}</div>`
+    : '';
+  function checksHtml(checks) {
+    return `<ul class="checks">${checks.map((c) => `
+      <li class="check">
+        <div><span class="verdict ${verdictClass[c.verdict] ?? ''}">${esc(c.verdict)}</span>${c.member ? pill('member', c.member) : ''}<span class="claim">${esc(c.claim)}</span></div>
+        <div class="why">${esc(c.explanation)}</div>
+        ${c.sides.length ? `<div class="sides">${c.sides.map((x) => `<div class="side"><strong>${esc(x.who)}</strong>${esc(x.view)}${sources(x.sources)}</div>`).join('')}</div>` : ''}
+        ${sources(c.sources)}
+      </li>`).join('')}</ul>`;
+  }
+
+  function topicDetail(t) {
+    const entries = [...t.entries].reverse().map((e) => `
+      <div class="entry"><span class="time">${esc(e.label)}</span><span class="pills">${pills(e.members, e.institutions)}</span><div class="summary">${md(e.notes)}</div></div>`).join('');
+    return `
+      <div class="topic-detail">
+        ${t.description ? `<p class="desc">${esc(t.description)}</p>` : ''}
+        ${isMinor(t) ? '' : `<h3>요약${t.summary ? ` · ${fmt.format(t.summary.until)}까지` : ''}</h3>
+        <div class="summary">${t.summary ? summaryHtml(t.summary, topicPeople(t.entries)[1].length <= 1) : '<p class="empty">요약 생성 중…</p>'}</div>`}
+        ${t.factcheck?.checks.length ? `<h3>팩트체크 · 웹 검색 기반, 참고용</h3>${checksHtml(t.factcheck.checks)}` : ''}
+        <h3>구간별 기록</h3>
+        ${entries}
+      </div>`;
+  }
+
+  function renderWindows(s) {
+    const primary = s.categories.length > 1 ? s.categories[0] : null;
+    // one chip per topic, with the members who spoke on it in this window
+    const chip = (w, id) => {
+      const t = topicsById.get(id);
+      if (!t) return '';
+      const members = t.entries.find((e) => e.start === w.start)?.members ?? [];
+      const who = members.length ? `<span class="who"> · ${members.map(esc).join(', ')}</span>` : '';
+      return `<button class="badge${t.category === primary ? '' : ' other'}" data-topic="${t.id}">${esc(t.title)}${who}</button>`;
+    };
+    // windows older than an hour show only their core line until expanded (not while filtering)
+    const body = (w) => {
+      const retry = w.skipped ? '건너뜀, summarize를 다시 시작하면 재시도' : '재시도 대기 중';
+      const routeErr = w.routeError && !w.routed ? `<p class="error">주제 분류 실패, ${retry} (${esc(w.routeError)})</p>` : '';
+      if (!w.summary) return w.error ? `<p class="error">요약 실패, ${retry} (${esc(w.error)})</p>${routeErr}` : '<p class="pending"><span class="spinner"></span>요약 중…</p>';
+      if (routeErr) return md(w.summary) + routeErr;
+      const core = w.summary.split('\n').find((l) => l.includes('**핵심**'));
+      if (filter || !core || w.end > Date.now() - 3_600_000) return md(w.summary);
+      return expanded.has(w.start)
+        ? `${md(w.summary)}<button class="more" data-expand="${w.start}">접기</button>`
+        : `${md(core)}<button class="more" data-expand="${w.start}">펼치기</button>`;
+    };
+    const shown = s.windows.filter((w) => matches(windowEntries(w)));
+    const list = document.getElementById('windows');
+    list.innerHTML = shown.length
+      ? shown.map((w) => `
+        <section class="card">
+          <span class="time">${range(w.start, w.end)}</span><span class="meta">자막 ${w.lineCount}줄</span>
+          <div class="summary">${body(w)}</div>
+          ${w.topics?.length ? `<div class="chips">${w.topics.map((id) => chip(w, id)).join('')}</div>` : ''}
+        </section>`).join('')
+      : `<p class="empty">${filter ? '해당하는 구간이 없습니다.' : '구간이 끝나면 요약이 표시됩니다.'}</p>`;
+  }
+  const expanded = new Set();
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && filter) setFilter(null);
+  });
+
+  document.addEventListener('click', (e) => {
+    const f = e.target.closest('[data-filter]');
+    if (f) return setFilter({ kind: f.dataset.filter, value: f.dataset.value });
+    if (e.target.closest('[data-clear-filter]')) return setFilter(null);
+    const x = e.target.closest('[data-expand]');
+    if (x) {
+      const start = Number(x.dataset.expand);
+      expanded.has(start) ? expanded.delete(start) : expanded.add(start);
+      return refresh().catch(console.error);
+    }
+    const el = e.target.closest('[data-topic]');
+    if (!el) return;
+    const fromWindow = !el.classList.contains('topic-row');
+    if (fromWindow && selected === el.dataset.topic) return; // chip of the open topic: keep it open
+    select(el.dataset.topic);
+    if (fromWindow) setTimeout(() => document.querySelector(`.topic-row[data-topic="${el.dataset.topic}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 200);
+  });
+
+  refresh().catch(console.error);
+  setInterval(() => refresh().catch(console.error), 5000);
+</script>
+</body>
+</html>

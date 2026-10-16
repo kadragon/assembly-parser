@@ -1,0 +1,21 @@
+{
+  "name": "assembly-parser",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Collect National Assembly webcast AI subtitles and summarize them in 10-minute windows",
+  "type": "module",
+  "scripts": {
+    "collect": "node src/collect.js",
+    "summarize": "node src/summarize.js",
+    "serve": "node src/serve.js",
+    "test": "node --test",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write ."
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15"
+  }
+}
