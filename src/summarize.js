@@ -41,6 +41,7 @@ const { values, positionals } = parseArgs({
     window: { type: 'string', default: '5' }, // minutes
     focus: { type: 'string' }, // e.g. 한국교원대학교 — becomes the first topic category
     'focus-keywords': { type: 'string' }, // comma-separated, e.g. 교원대 — hints the router
+    'focus-note': { type: 'string' }, // projects of the focus institution, e.g. 부설 장애인 체육 특수학교 설립
     rebuild: { type: 'boolean', default: false }, // discard summaries (topics are archived, not deleted)
     once: { type: 'boolean', default: false }, // process closed windows, then exit
     factcheck: { type: 'boolean', default: false }, // web-check members' factual claims (slow, uses web search)
@@ -49,7 +50,7 @@ const { values, positionals } = parseArgs({
 });
 if (!positionals[0]) {
   console.error(
-    'usage: node src/summarize.js <player.asp URL | xcgcd> [--window 5] [--focus 기관명 --focus-keywords k1,k2] [--rebuild] [--once] [--factcheck] [--curate] [--data data]',
+    'usage: node src/summarize.js <player.asp URL | xcgcd> [--window 5] [--focus 기관명 --focus-keywords k1,k2 --focus-note 소관사업] [--rebuild] [--once] [--factcheck] [--curate] [--data data]',
   );
   process.exit(1);
 }
@@ -79,6 +80,7 @@ const focusKeywords = focus
       .map((s) => s.trim())
       .filter(Boolean)
   : [];
+const focusNote = (focus && values['focus-note']?.trim()) || null;
 const categories = focus ? [focus, '그외'] : ['전체'];
 
 /** windows[start] = { start, end, lineCount, summary?, error?, routed?, routeError?, topics?: [topicId], skipped? } */
@@ -253,6 +255,7 @@ async function processWindow(transcript, start) {
         lines,
         previousItems,
         hint,
+        focusNote,
         knownMembers: seen('members'),
         knownInstitutions: seen('institutions'),
       }).then(
@@ -329,7 +332,7 @@ async function curate({ force = false } = {}) {
   const last = state.curation;
   if (!force && last && (until <= last.until || Date.now() - last.at < CURATE_EVERY_MS)) return;
   console.log(`curating ${live.length} topics (proposal only)`);
-  const raw = await curateTopics({ meeting, categories, topics: live });
+  const raw = await curateTopics({ meeting, categories, focusNote, topics: live });
   const ops = validateCuration(raw, live, categories);
   const rejected = raw.filter((o) => !ops.includes(o));
   fs.appendFileSync(
@@ -373,6 +376,7 @@ async function tick() {
 
 console.log(`${meeting.committee} — ${meeting.subject}`);
 console.log(`categories: ${categories.join(' / ')}; topics in ${path.join(dir, 'topics')}`);
+if (focusNote) console.log(`focus note: ${focusNote}`);
 
 if (values.once) {
   await tick();

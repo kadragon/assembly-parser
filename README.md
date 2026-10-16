@@ -26,7 +26,8 @@ npm install
 URL='https://assembly.webcast.go.kr/main/player.asp?xcode=58&xcgcd=DCM00005822439A401&'
 
 npm run collect -- "$URL"
-npm run summarize -- "$URL" --focus 한국교원대학교 --focus-keywords 교원대,교원대학교
+npm run summarize -- "$URL" --focus 한국교원대학교 --focus-keywords 교원대,교원대학교 \
+  --focus-note "부설 장애인 체육 중·고등 특수학교(2028년 3월 개교 예정) 설립"
 npm run serve -- "$URL"            # http://localhost:3000 접속
 ```
 
@@ -49,6 +50,8 @@ npm run serve -- "$URL"            # http://localhost:3000 접속
 - `--focus <기관명>`: 범주를 `<기관명>` / `그외`로 나눕니다. 지정하지 않으면
   `전체` 하나입니다. `--focus-keywords`는 쉼표로 구분한 키워드 목록으로,
   자막에 키워드가 나오면 라우터에 힌트로 전달됩니다(공백 무시, 기본값은 기관명).
+  `--focus-note`에는 기관명이 자막에 안 나와도 그 기관 소관으로 분류할 사업을
+  적습니다(예: `"부설 장애인 체육 중·고등 특수학교(2028년 3월 개교 예정) 설립"`).
 - `--rebuild`: 저장된 자막으로 처음부터 다시 요약합니다(`src/summarizer.js`의
   프롬프트를 고친 뒤 사용). 기존 주제는 삭제하지 않고
   `topics-archived-<시각>/`으로 옮깁니다. `--window`나 범주를 바꿔도 같은
