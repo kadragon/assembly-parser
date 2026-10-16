@@ -111,12 +111,36 @@
   .verdict.v-false { color: var(--err); background: var(--err-bg); }
   .verdict.v-disputed { color: var(--inst); background: var(--inst-bg); }
   .sides { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; margin-top: 6px; }
-  .side { font-size: 14px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
-  .side strong { display: block; font-size: 12px; color: var(--inst); }
+  .view { font-size: 14px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+  .view strong { display: block; font-size: 12px; color: var(--inst); }
   .sources { font-size: 12px; margin-top: 4px; overflow-wrap: anywhere; }
   .sources a { color: var(--accent); margin-right: 8px; }
   .more { font: inherit; font-size: 13px; color: var(--accent); background: none; border: 0; padding: 0; margin-top: 6px; cursor: pointer; }
+  .share { float: right; font: inherit; font-size: 12px; line-height: 20px; color: var(--muted); background: none; border: 1px solid var(--line); border-radius: 6px; padding: 0 8px; margin-left: 8px; cursor: pointer; }
+  .share:hover { color: var(--accent); border-color: var(--accent); }
+  .share:disabled { opacity: .6; cursor: progress; }
+  .detail-actions { margin-top: 10px; overflow: hidden; }
+  .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 10; background: var(--text); color: var(--bg); font-size: 14px; padding: 8px 14px; border-radius: 8px; box-shadow: 0 4px 16px rgb(0 0 0 / .2); }
+  .toast[hidden] { display: none; }
+  /* share image: rendered off screen, always in the light theme */
+  #share-host { position: fixed; left: -10000px; top: 0; }
+  .share-card {
+    --bg: #f6f7f9; --card: #fff; --text: #1d2330; --muted: #6b7280; --line: #e3e6eb; --accent: #1f5fbf;
+    --member: #0b7a57; --member-bg: #e3f5ee; --inst: #6b3fb5; --inst-bg: #efe8fb;
+    --err: #b42318; --err-bg: #fde7e5; --warn: #9a5b00; --warn-bg: #fdf0d9;
+    width: 720px; padding: 28px 32px 20px; background: var(--card); color: var(--text); border-top: 6px solid var(--accent);
+  }
+  .share-card .sc-meeting { color: var(--muted); font-size: 13px; }
+  .share-card .sc-subject { font-size: 17px; font-weight: 700; margin-top: 2px; }
+  .share-card .sc-title { font-size: 20px; font-weight: 700; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+  .share-card .sc-sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .share-card .badge { cursor: default; }
+  .share-card h3 { font-size: 13px; color: var(--muted); font-weight: 600; margin: 18px 0 0; }
+  .share-card .entry { margin-top: 10px; }
+  .share-card .entry .time { font-size: 13px; }
+  .share-card .sc-foot { color: var(--muted); font-size: 12px; margin-top: 20px; padding-top: 10px; border-top: 1px solid var(--line); }
 </style>
+<script defer src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.13/dist/html-to-image.js" integrity="sha384-Tha/42qsYmpYmQ07pX+nJzkKumO0BzKJxK/uzVc7xyBQxVCUgQBhQIG8L7vXK+9C" crossorigin="anonymous"></script>
 </head>
 <body>
 <main>
@@ -142,6 +166,7 @@
     </aside>
   </div>
 </main>
+<div class="toast" id="toast" role="status" hidden></div>
 <script>
   const fmt = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false });
   const clock = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
@@ -233,6 +258,7 @@
   async function refresh() {
     const res = await fetch('/api/state');
     const s = await res.json();
+    lastState = s;
     subject = s.meeting.subject;
     updateTitle();
     if (s.lastLineAt) lastLineAt = Math.max(lastLineAt ?? 0, s.lastLineAt);
@@ -389,16 +415,35 @@
       <li class="check">
         <div><span class="verdict ${verdictClass[c.verdict] ?? ''}">${esc(c.verdict)}</span>${c.member ? pill('member', c.member) : ''}<span class="claim">${esc(c.claim)}</span></div>
         <div class="why">${esc(c.explanation)}</div>
-        ${c.sides.length ? `<div class="sides">${c.sides.map((x) => `<div class="side"><strong>${esc(x.who)}</strong>${esc(x.view)}${sources(x.sources)}</div>`).join('')}</div>` : ''}
+        ${c.sides.length ? `<div class="sides">${c.sides.map((x) => `<div class="view"><strong>${esc(x.who)}</strong>${esc(x.view)}${sources(x.sources)}</div>`).join('')}</div>` : ''}
         ${sources(c.sources)}
       </li>`).join('')}</ul>`;
   }
 
+  // back-to-back windows (stored sorted by start) collapse into one run
+  function entryRuns(entries) {
+    const runs = [];
+    for (const e of entries) {
+      const last = runs.at(-1);
+      if (last && last.end === e.start) {
+        last.end = e.end;
+        last.members = uniq([...last.members, ...(e.members ?? [])]);
+        last.institutions = uniq([...last.institutions, ...(e.institutions ?? [])]);
+        last.notes += `\n${e.notes}`;
+      } else {
+        runs.push({ start: e.start, end: e.end, members: e.members ?? [], institutions: e.institutions ?? [], notes: e.notes });
+      }
+    }
+    return runs;
+  }
+  const entriesHtml = (t) => entryRuns(t.entries).map((r) => `
+      <div class="entry"><span class="time">${range(r.start, r.end)}</span><span class="pills">${pills(r.members, r.institutions)}</span><div class="summary">${md(r.notes)}</div></div>`).join('');
+
   function topicDetail(t) {
-    const entries = [...t.entries].reverse().map((e) => `
-      <div class="entry"><span class="time">${esc(e.label)}</span><span class="pills">${pills(e.members, e.institutions)}</span><div class="summary">${md(e.notes)}</div></div>`).join('');
+    const entries = entriesHtml(t);
     return `
       <div class="topic-detail">
+        <div class="detail-actions"><button class="share" data-share="topic" data-id="${t.id}">이미지로 공유</button></div>
         ${t.description ? `<p class="desc">${esc(t.description)}</p>` : ''}
         ${isMinor(t) ? '' : `<h3>요약${t.summary ? ` · ${fmt.format(t.summary.until)}까지` : ''}</h3>
         <div class="summary">${t.summary ? summaryHtml(t.summary, topicPeople(t.entries)[1].length <= 1) : '<p class="empty">요약 생성 중…</p>'}</div>`}
@@ -435,6 +480,7 @@
     list.innerHTML = shown.length
       ? shown.map((w) => `
         <section class="card">
+          ${w.summary ? `<button class="share" data-share="window" data-id="${w.start}">이미지로 공유</button>` : ''}
           <span class="time">${range(w.start, w.end)}</span><span class="meta">자막 ${w.lineCount}줄</span>
           <div class="summary">${body(w)}</div>
           ${w.topics?.length ? `<div class="chips">${w.topics.map((id) => chip(w, id)).join('')}</div>` : ''}
@@ -443,11 +489,121 @@
   }
   const expanded = new Set();
 
+  // Share as image: build a standalone card off screen, render it to PNG, then hand it
+  // to the share sheet (touch devices) or the clipboard (desktop), else download it.
+  let lastState = null;
+  let toastTimer = null;
+  function toast(text) {
+    const el = document.getElementById('toast');
+    el.textContent = text;
+    el.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { el.hidden = true; }, 2500);
+  }
+
+  function shareCard(s, title, sub, body) {
+    const meeting = [s.meeting.committee, s.meeting.date].filter(Boolean).join(' · ');
+    return `
+      <div class="share-card">
+        <div class="sc-meeting">${esc(meeting)}</div>
+        <div class="sc-subject">${esc(s.meeting.subject)}</div>
+        <div class="sc-title">${title}</div>
+        ${sub ? `<div class="sc-sub">${sub}</div>` : ''}
+        ${body}
+        <div class="sc-foot">국회 의사중계 AI 자막을 자동 요약한 내용으로, 실제 발언과 다를 수 있습니다.</div>
+      </div>`;
+  }
+
+  function windowShare(s, w) {
+    const titles = (w.topics ?? []).map((id) => topicsById.get(id)).filter(Boolean)
+      .map((t) => `<span class="badge${s.categories.length > 1 && t.category !== s.categories[0] ? ' other' : ''}">${esc(t.title)}</span>`).join('');
+    return shareCard(s, `<span class="time">${range(w.start, w.end)}</span> ${s.windowMinutes}분 구간 요약`, '',
+      `<div class="summary">${md(w.summary)}</div>${titles ? `<div class="chips">${titles}</div>` : ''}`);
+  }
+
+  function topicShare(s, t) {
+    const [members, institutions] = topicPeople(t.entries);
+    const first = t.entries[0], last = t.entries.at(-1);
+    const span = first ? ` · ${fmt.format(first.start)}–${fmt.format(last.end)} · 기록 ${t.entries.length}` : '';
+    // same sections as the open topic on screen: summary, fact checks, per-window entries
+    const summary = isMinor(t) || !t.summary ? ''
+      : `<h3>요약 · ${fmt.format(t.summary.until)}까지</h3><div class="summary">${summaryHtml(t.summary, institutions.length <= 1)}</div>`;
+    const checks = t.factcheck?.checks.length ? `<h3>팩트체크 · 웹 검색 기반, 참고용</h3>${checksHtml(t.factcheck.checks)}` : '';
+    const entries = entriesHtml(t);
+    const body = `${summary}${checks}<h3>구간별 기록</h3>${entries}`;
+    return shareCard(s, esc(t.title), `${esc(t.category)}${span}`,
+      `<div class="pills">${pills(members, institutions)}</div>
+       ${t.description ? `<p class="desc" style="color:var(--muted);font-size:14px;margin:8px 0 0">${esc(t.description)}</p>` : ''}${body}`);
+  }
+
+  async function deliver(blob, name) {
+    const file = new File([blob], name, { type: 'image/png' });
+    const viaSheet = async () => {
+      if (!navigator.canShare?.({ files: [file] })) return false;
+      try {
+        await navigator.share({ files: [file] });
+      } catch (err) {
+        if (err.name !== 'AbortError') return false; // e.g. the click's user activation expired
+      }
+      return true;
+    };
+    const viaClipboard = async () => {
+      try {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+        toast('이미지를 클립보드에 복사했습니다. 붙여넣어 공유하세요.');
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const order = matchMedia('(pointer: coarse)').matches ? [viaSheet, viaClipboard] : [viaClipboard, viaSheet];
+    for (const fn of order) if (await fn()) return;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+    toast('이미지를 내려받았습니다.');
+  }
+
+  async function shareImage(btn) {
+    const s = lastState;
+    const { share: kind, id } = btn.dataset;
+    const w = kind === 'window' && s?.windows.find((x) => x.start === Number(id));
+    const t = kind === 'topic' && topicsById.get(id);
+    if (!w && !t) return;
+    if (!window.htmlToImage) return toast('이미지 모듈을 불러오지 못했습니다.');
+    const hm = (ms) => fmt.format(ms).replace(':', '');
+    const base = w ? `${s.meeting.date}_${hm(w.start)}-${hm(w.end)}_구간요약` : `${s.meeting.date}_주제_${t.title}`;
+    const name = `${base.replace(/[\\/:*?"<>|()\s]+/g, '_')}.png`;
+    const host = document.createElement('div');
+    host.id = 'share-host';
+    host.innerHTML = w ? windowShare(s, w) : topicShare(s, t);
+    document.body.append(host);
+    btn.disabled = true;
+    try {
+      // web fonts are skipped (system Korean fonts are used) to avoid fetching every Pretendard subset
+      // 3x, lowered for long cards so the canvas stays under ~16M px (iOS Safari's limit)
+      const card = host.firstElementChild;
+      const pixelRatio = Math.min(3, Math.sqrt(16_000_000 / (card.offsetWidth * card.offsetHeight)));
+      const blob = await htmlToImage.toBlob(card, { pixelRatio, skipFonts: true });
+      await deliver(blob, name);
+    } catch (err) {
+      console.error(err);
+      toast('이미지를 만들지 못했습니다.');
+    } finally {
+      host.remove();
+      btn.disabled = false;
+    }
+  }
+
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && filter) setFilter(null);
   });
 
   document.addEventListener('click', (e) => {
+    const sh = e.target.closest('[data-share]');
+    if (sh) return shareImage(sh);
     const f = e.target.closest('[data-filter]');
     if (f) return setFilter({ kind: f.dataset.filter, value: f.dataset.value });
     if (e.target.closest('[data-clear-filter]')) return setFilter(null);
