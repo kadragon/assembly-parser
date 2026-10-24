@@ -5,6 +5,20 @@ const ID = /^[A-Za-z0-9_-]{1,100}$/;
 const MAX_BYTES = 1_000_000;
 const MAX_ENTRIES = 500;
 const text = (value) => (typeof value === 'string' ? value.trim().slice(0, 500) : '');
+const entities = {
+  '&amp;': '&',
+  '&lt;': '<',
+  '&gt;': '>',
+  '&quot;': '"',
+  '&#39;': "'",
+  '&nbsp;': ' ',
+};
+// main.js renders these fields as HTML; show them as plain text instead.
+const plain = (value) =>
+  text(value)
+    .replace(/<[^>]*>/g, '')
+    .replace(/&(amp|lt|gt|quot|#39|nbsp);/g, (entity) => entities[entity])
+    .trim();
 
 /** Normalize live_list.asp JSON; reject shapes that cannot be told apart from an empty list. */
 export function normalizeLiveList(data) {
@@ -26,14 +40,28 @@ export function normalizeLiveList(data) {
       return {
         xcode,
         xcgcd,
-        committee: text(item.xname),
-        subject: text(item.xsubj),
-        status: text(item.xdesc),
+        committee: plain(item.xname),
+        subject: plain(item.xsubj),
+        status: plain(item.xdesc),
         live,
         url,
       };
     });
   return { checkedAt: text(data.qtime), broadcasts };
+}
+
+/** Read at most MAX_BYTES; leaving the loop early cancels the rest of the stream. */
+async function readBounded(res) {
+  const tooLarge = () => new Error('Broadcast list response is too large');
+  if (Number(res.headers.get('content-length')) > MAX_BYTES) throw tooLarge();
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of res.body ?? []) {
+    size += chunk.byteLength;
+    if (size > MAX_BYTES) throw tooLarge();
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks).toString('utf8');
 }
 
 export async function fetchLiveList({ fetchImpl = fetch, timeout = 10000 } = {}) {
@@ -46,12 +74,11 @@ export async function fetchLiveList({ fetchImpl = fetch, timeout = 10000 } = {})
       redirect: 'error',
     });
     if (!res.ok) throw new Error(`live_list.asp HTTP ${res.status}`);
-    body = await res.text();
+    body = await readBounded(res);
   } catch (error) {
     if (error.name === 'TimeoutError') throw new Error('Broadcast list request timed out');
     throw error;
   }
-  if (body.length > MAX_BYTES) throw new Error('Broadcast list response is too large');
   let data;
   try {
     data = JSON.parse(body);
@@ -64,24 +91,26 @@ export async function fetchLiveList({ fetchImpl = fetch, timeout = 10000 } = {})
 /** Cache the list, share in-flight lookups, and keep manual refresh from hammering upstream. */
 export function createCatalog(load, { ttl = 30000, minRefresh = 5000, now = Date.now } = {}) {
   let cached;
+  let failure;
   let pending;
   return (refresh = false) => {
     if (pending) return pending;
-    if (cached) {
-      const age = now() - cached.at;
-      if (age < (cached.error || refresh ? minRefresh : ttl))
-        return cached.error ? Promise.reject(cached.error) : Promise.resolve(cached.value);
-    }
     const at = now();
+    const fresh = (limit) => cached && at - cached.fetchedAt < limit;
+    if (fresh(refresh ? minRefresh : ttl)) return Promise.resolve(cached);
+    // A failed lookup pauses retries but never hides a list that is still within its TTL.
+    if (failure && at - failure.at < minRefresh)
+      return fresh(ttl) ? Promise.resolve(cached) : Promise.reject(failure.error);
     pending = Promise.resolve()
       .then(load)
       .then(
         (list) => {
-          cached = { at, value: { ...list, fetchedAt: at } };
-          return cached.value;
+          cached = { ...list, fetchedAt: at };
+          failure = null;
+          return cached;
         },
         (error) => {
-          cached = { at, error };
+          failure = { at, error };
           throw error;
         },
       )

@@ -172,7 +172,7 @@ function renderCatalog() {
         document.querySelector('#focus').focus();
       });
       row.append(choose);
-    } else if (item.live) row.append(el('span', '주소 직접 입력', 'meta'));
+    } else if (item.live) row.append(el('span', '회의 정보가 없어 선택할 수 없음', 'meta'));
     catalogList.append(row);
   }
   return shown.filter((item) => item.live).length;
