@@ -40,7 +40,6 @@ No task authorizes publishing the repository, selecting a license, or deploying 
 
 ## 2-live-broadcast-catalog
 
-- [ ] [FEAT] Choose Assembly broadcasts from a live catalog with direct-URL fallback.
   - Source: [Approved design](docs/design/transcript-generalization.md), Discover
     broadcasts from the existing Assembly contract; delivery item 2.
   - Scope: Server-side catalog fetch, normalized listing, refresh, meeting selection,
@@ -158,7 +157,7 @@ No task authorizes publishing the repository, selecting a license, or deploying 
 
 ## 7-public-release-preparation
 
-- [ ] [DOCS] Deliver a reproducible demo, CI, and public-facing setup documentation. *(blocked by: 2-live-broadcast-catalog)* *(blocked by: 5-subtitle-file-uploads)* *(blocked by: 6-interest-category-editor)*
+- [ ] [DOCS] Deliver a reproducible demo, CI, and public-facing setup documentation. *(blocked by: 5-subtitle-file-uploads)* *(blocked by: 6-interest-category-editor)*
   - Source: [Approved design](docs/design/transcript-generalization.md), Prepare a
     reproducible local release; Testing Decisions; Out of Scope; delivery item 7.
   - Scope: Synthetic fixtures/precomputed demo, one-command quick start, supported
@@ -181,3 +180,9 @@ No task authorizes publishing the repository, selecting a license, or deploying 
     separate decisions; do not claim the repository has been published.
   - Dependencies: 2-live-broadcast-catalog, 5-subtitle-file-uploads,
     6-interest-category-editor, and their transitive prerequisites.
+
+## Review Backlog
+
+### PR #2 — Live broadcast catalog (2026-10-25)
+
+- [ ] [debt] Use the live_list.asp `xsami` subtitle hint to mark caption-ineligible live entries in the catalog once its meaning is confirmed against a live broadcast; Start already revalidates (source: code-review) — src/catalog.js:37

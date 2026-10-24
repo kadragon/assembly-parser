@@ -144,6 +144,64 @@ async function refresh() {
     ),
   );
 }
+const catalogStatus = document.querySelector('#catalog-status');
+const catalogList = document.querySelector('#catalog-list');
+const refreshButton = document.querySelector('#catalog-refresh');
+const urlInput = document.querySelector('#url');
+let broadcasts = [];
+function renderCatalog() {
+  catalogList.replaceChildren();
+  // Committees without any broadcast today only add noise.
+  const shown = broadcasts.filter((item) => item.live || item.xcgcd);
+  for (const item of shown) {
+    const row = el('li');
+    if (item.url && item.url === urlInput.value) row.className = 'selected';
+    const info = el('div');
+    info.append(
+      el('strong', `${item.committee}${item.subject ? ` · ${item.subject}` : ''}`),
+      el('span', item.live ? `생중계 · ${item.status}` : item.status || '중계 대기', 'meta'),
+    );
+    row.append(info);
+    if (item.url) {
+      const choose = el('button', '선택');
+      choose.type = 'button';
+      choose.addEventListener('click', () => {
+        urlInput.value = item.url;
+        message.textContent = `${item.committee} 회의를 선택했습니다. 관심 주제를 정한 뒤 시작하세요.`;
+        renderCatalog();
+        document.querySelector('#focus').focus();
+      });
+      row.append(choose);
+    } else if (item.live) row.append(el('span', '회의 정보가 없어 선택할 수 없음', 'meta'));
+    catalogList.append(row);
+  }
+  return shown.filter((item) => item.live).length;
+}
+async function loadCatalog(refresh = false) {
+  refreshButton.disabled = true;
+  catalogStatus.textContent = '목록을 불러오고 있습니다…';
+  try {
+    const res = await fetch(`/api/catalog${refresh ? '?refresh=1' : ''}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    broadcasts = data.broadcasts;
+    const live = renderCatalog();
+    const checked = `확인 ${time(data.fetchedAt)}`;
+    catalogStatus.textContent = live
+      ? `${live}개 회의가 생중계 중입니다. ${checked}`
+      : `지금은 생중계 중인 회의가 없습니다. ${checked}`;
+  } catch (error) {
+    // Keep a list that already loaded; only the refresh failed.
+    catalogStatus.textContent = broadcasts.length
+      ? `목록을 새로 고치지 못해 이전 목록을 표시합니다. (${error.message})`
+      : `생중계 목록을 불러오지 못했습니다. 주소를 직접 입력할 수 있습니다. (${error.message})`;
+  } finally {
+    refreshButton.disabled = false;
+  }
+}
+refreshButton.addEventListener('click', () => loadCatalog(true));
+urlInput.addEventListener('input', () => renderCatalog());
+loadCatalog();
 form.addEventListener('submit', (event) => {
   event.preventDefault();
   const fields = Object.fromEntries(new FormData(form));

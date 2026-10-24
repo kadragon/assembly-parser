@@ -7,8 +7,9 @@
 <section class="intro"><p class="eyebrow">LIVE TRANSCRIPT / WORKSPACE</p><h1>회의를 따라가고,<br>기록을 남기세요.</h1><p>국회 생중계 주소를 입력하면 자막 수집과 요약을 함께 시작합니다.<br>이 창을 닫아도 서버가 실행 중이면 기록은 계속됩니다.</p></section>
 <div class="workspace">
 <section class="setup" aria-labelledby="setup-title"><div class="section-heading"><span class="number">01</span><h2 id="setup-title">새 기록 시작</h2></div>
+<div class="catalog"><div class="catalog-heading"><h3 id="catalog-title">지금 생중계 중인 회의</h3><button type="button" id="catalog-refresh">새로고침</button></div><p id="catalog-status" class="hint" role="status">목록을 불러오고 있습니다…</p><ul id="catalog-list" aria-labelledby="catalog-title"></ul></div>
 <form id="start-form">
-<label for="url">국회 생중계 주소</label><input id="url" name="url" type="url" required placeholder="https://assembly.webcast.go.kr/main/player.asp?…"><p class="hint">국회 인터넷의사중계의 재생 화면 주소를 붙여 넣으세요.</p>
+<label for="url">국회 생중계 주소</label><input id="url" name="url" type="url" required placeholder="https://assembly.webcast.go.kr/main/player.asp?…"><p class="hint">목록에서 고르거나 국회 인터넷의사중계의 재생 화면 주소를 직접 붙여 넣으세요.</p>
 <label for="focus">관심 기관·주제 <span>선택</span></label><input id="focus" name="focus" maxlength="2000" placeholder="예: 한국교원대학교"><p class="hint">비워 두면 회의 전체를 요약합니다.</p>
 <label for="focusKeywords">관련 키워드 <span>선택 · 쉼표로 구분</span></label><input id="focusKeywords" name="focusKeywords" maxlength="2000" placeholder="예: 교원대, 교원 양성">
 <label for="focusNote">관심 범위 <span>선택</span></label><textarea id="focusNote" name="focusNote" rows="3" maxlength="2000" placeholder="특히 살펴볼 사업이나 쟁점을 적어 주세요."></textarea>

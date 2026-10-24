@@ -24,9 +24,11 @@ npm start
 # Optional: npm start -- --port 3100 --data /path/to/local/data
 ```
 
-Paste an official Assembly player URL, enter optional focus settings, and start
-collection and summarization together. Only currently live broadcasts with AI
-captions can start. The application binds to loopback; use the exact printed
+Choose a meeting from the live broadcast list (fetched from the Assembly main-page
+feed, cached briefly; **Refresh** rechecks it) or paste an official Assembly player
+URL, enter optional focus settings, and start collection and summarization
+together. Direct URL entry works even when the list cannot be loaded. Only
+currently live broadcasts with AI captions can start; this is rechecked at Start. The application binds to loopback; use the exact printed
 address because write requests require matching Host, Origin, and a session token.
 A busy port fails before any worker starts.
 
