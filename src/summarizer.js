@@ -188,6 +188,11 @@ function runClaude(
   return track(job, spawnClaude(system, prompt, schema, model, tools, timeoutMs));
 }
 
+const modelChildren = new Set();
+export function stopModelChildren() {
+  for (const child of modelChildren) child.kill('SIGKILL');
+}
+
 function spawnClaude(system, prompt, schema, model, tools, timeoutMs) {
   // isolate from the dev setup: no MCP servers, no user/project settings (so no installed plugins,
   // skills, hooks or CLAUDE.md), and no built-in skills either; ~2s less startup per call
@@ -209,6 +214,7 @@ function spawnClaude(system, prompt, schema, model, tools, timeoutMs) {
   if (schema) args.push('--output-format', 'json', '--json-schema', JSON.stringify(schema));
   return new Promise((resolve, reject) => {
     const child = spawn('claude', args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    modelChildren.add(child);
     let out = '';
     let err = '';
     let timedOut = false;
@@ -219,10 +225,12 @@ function spawnClaude(system, prompt, schema, model, tools, timeoutMs) {
     child.stdout.on('data', (d) => (out += d));
     child.stderr.on('data', (d) => (err += d));
     child.on('error', (e) => {
+      modelChildren.delete(child);
       clearTimeout(timer);
       reject(e);
     });
     child.on('close', (code) => {
+      modelChildren.delete(child);
       clearTimeout(timer);
       if (timedOut) return reject(new Error(`claude timed out after ${timeoutMs / 1000}s`));
       if (code !== 0) return reject(new Error(`claude exited ${code}: ${err || out}`));

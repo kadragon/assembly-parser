@@ -5,9 +5,8 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { files, meetingDir, readJson, readTranscript } from './store.js';
-import { loadTopics } from './topics.js';
-import { windowStart } from './transcript.js';
+import { snapshot } from './snapshot.js';
+import { files, meetingDir } from './store.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const indexHtml = path.join(here, '..', 'public', 'index.html');
@@ -25,48 +24,6 @@ if (!positionals[0]) {
 }
 const dir = meetingDir(positionals[0], values.data);
 const f = files(dir);
-
-function alive(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return err.code === 'EPERM';
-  }
-}
-
-function snapshot() {
-  const meeting = readJson(f.meeting, {});
-  const state = readJson(f.state, { windowMinutes: 5, windows: {} });
-  const windowMs = state.windowMinutes * 60_000;
-  const current = windowStart(Date.now(), windowMs);
-  const windows = Object.values(state.windows);
-  const routed = windows.filter((w) => w.routed).map((w) => w.end);
-  let lastLineAt = null; // collect.js only appends, so mtime is when the last caption arrived
-  try {
-    lastLineAt = fs.statSync(f.transcript).mtimeMs;
-  } catch {}
-  return {
-    lastLineAt,
-    meeting: {
-      committee: meeting.committee ?? '',
-      subject: meeting.subject ?? '수집 대기 중',
-      date: meeting.date ?? '',
-    },
-    windowMinutes: state.windowMinutes,
-    categories: state.categories ?? [],
-    // topics are current through the last window that went through routing
-    topicsUntil: routed.length ? Math.max(...routed) : null,
-    topics: loadTopics(dir),
-    running: state.running?.pid && alive(state.running.pid) ? state.running.jobs : [],
-    windows: windows.sort((a, b) => b.start - a.start),
-    current: {
-      start: current,
-      end: current + windowMs,
-      lines: readTranscript(f.transcript).between(current, current + windowMs),
-    },
-  };
-}
 
 // Tail transcript.jsonl and push each appended line to connected browsers (SSE).
 const liveClients = new Set();
@@ -108,7 +65,7 @@ http
     }
     if (req.url === '/api/state') {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify(snapshot()));
+      res.end(JSON.stringify(snapshot(dir)));
       return;
     }
     if (req.url === '/favicon.ico') {

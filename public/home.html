@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ko">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>국회 기록실 · 세션 관리</title><link rel="stylesheet" href="/home.css"><script src="/home.js" defer></script></head>
+<body>
+<header><a href="/" class="wordmark">국회 기록실<span>ASSEMBLY RECORDS</span></a><span class="local">내 컴퓨터에서 실행 중</span></header>
+<main>
+<section class="intro"><p class="eyebrow">LIVE TRANSCRIPT / WORKSPACE</p><h1>회의를 따라가고,<br>기록을 남기세요.</h1><p>국회 생중계 주소를 입력하면 자막 수집과 요약을 함께 시작합니다.<br>이 창을 닫아도 서버가 실행 중이면 기록은 계속됩니다.</p></section>
+<div class="workspace">
+<section class="setup" aria-labelledby="setup-title"><div class="section-heading"><span class="number">01</span><h2 id="setup-title">새 기록 시작</h2></div>
+<form id="start-form">
+<label for="url">국회 생중계 주소</label><input id="url" name="url" type="url" required placeholder="https://assembly.webcast.go.kr/main/player.asp?…"><p class="hint">국회 인터넷의사중계의 재생 화면 주소를 붙여 넣으세요.</p>
+<label for="focus">관심 기관·주제 <span>선택</span></label><input id="focus" name="focus" maxlength="2000" placeholder="예: 한국교원대학교"><p class="hint">비워 두면 회의 전체를 요약합니다.</p>
+<label for="focusKeywords">관련 키워드 <span>선택 · 쉼표로 구분</span></label><input id="focusKeywords" name="focusKeywords" maxlength="2000" placeholder="예: 교원대, 교원 양성">
+<label for="focusNote">관심 범위 <span>선택</span></label><textarea id="focusNote" name="focusNote" rows="3" maxlength="2000" placeholder="특히 살펴볼 사업이나 쟁점을 적어 주세요."></textarea>
+<label for="windowMinutes">요약 간격</label><select id="windowMinutes" name="windowMinutes"><option value="5">5분</option><option value="10">10분</option><option value="15">15분</option><option value="30">30분</option><option value="60">60분</option></select>
+<button type="submit" class="primary">수집·요약 시작 <span aria-hidden="true">↗</span></button><p class="hint">자막은 로컬에 저장되며, 요약할 때 Claude로 전송됩니다.</p>
+</form></section>
+<section class="saved" aria-labelledby="saved-title"><div class="section-heading"><span class="number">02</span><h2 id="saved-title">저장된 기록</h2><span id="count"></span></div><p class="hint">수집과 요약 상태를 따로 확인하세요. 여러 세션의 요약은 순서대로 처리합니다.</p><div id="warnings" role="status"></div><div id="sessions"></div></section>
+</div><p id="message" role="status" aria-live="polite"></p>
+</main><footer>국회 기록실 <span>자막은 발언 원문과 다를 수 있습니다.</span></footer>
+</body></html>

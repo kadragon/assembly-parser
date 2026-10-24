@@ -18,6 +18,44 @@ npm install
 
 ### 빠른 시작
 
+```bash
+npm start
+# Open the printed http://127.0.0.1:3000 address in your browser.
+# Optional: npm start -- --port 3100 --data /path/to/local/data
+```
+
+Paste an official Assembly player URL, enter optional focus settings, and start
+collection and summarization together. Only currently live broadcasts with AI
+captions can start. The application binds to loopback; use the exact printed
+address because write requests require matching Host, Origin, and a session token.
+A busy port fails before any worker starts.
+
+The home page lists saved sessions with separate collection and summary status.
+Closing a tab or navigating between sessions does not stop workers. **Stop** stops
+both workers for that session; **Retry summary** leaves collection running;
+**Finalize last window** processes the last partial window after collection stops.
+Server shutdown stops its owned workers and model processes. Restarting the server
+never resumes collection automatically. After finalizing a partial window, resume
+is refused until that window ends, so new captions cannot silently enter an already
+completed summary. **Resume collection** displays the missed
+interval: captions from that interval cannot be retrieved.
+
+Summary workers share one queue across browser sessions. Each worker retains the
+existing bounded model-call concurrency (up to four topic calls). The standalone
+CLI uses the same per-session writer locks. A second server cannot control the same
+data directory. Dead-process locks are recovered; unknown owners fail closed.
+
+Focus settings are saved per session. Changing saved settings, or starting browser
+summarization for a legacy session that already has summaries, is refused until the
+explicit rebuild workflow is available. Legacy records remain viewable. Broadcast
+catalogs, uploads, and category editing are not included yet.
+
+Claude Code must be installed and authenticated for summarization. Although storage
+is local, transcript text is sent to Claude. Summary errors pause that session until an explicit retry and leave collection running;
+check the session error, fix CLI installation/authentication, then retry.
+
+### 기존 독립 실행 명령
+
 명령마다 터미널을 따로 열어 실행합니다. `collect`는 회의 생중계가 시작되기
 전에 띄워 두어야 합니다. 자막은 생중계 중에만 들어오고, 지난 자막은 받을 수
 없습니다.
@@ -34,12 +72,13 @@ npm run serve -- "$URL"            # http://localhost:3000 접속
 회의 내내 켜 두어야 하는 것은 `collect`뿐이고, `summarize`와 `serve`는 언제든
 다시 시작해도 됩니다. `summarize`와 `serve`에는 URL 대신 xcgcd
 (`DCM00005822439A401`)만 넘겨도 됩니다. 회의가 끝난 뒤
-`npm run summarize -- "$URL" --once`를 실행하면 남은 구간을 처리하고 종료합니다.
+`npm run summarize -- "$URL" --once --finalize`를 실행하면 마지막 부분 구간까지 처리하고 종료합니다.
 
 ### 명령
 
 | 명령 | 옵션 |
 |---|---|
+| `start` | `--port <n>` (1–65535, default 3000), `--data <dir>` |
 | `collect <URL>` | `--data <dir>` (기본값 `data`) |
 | `summarize <URL\|xcgcd>` | 아래 옵션과 `--data <dir>` |
 | `serve <URL\|xcgcd>` | `--port <n>` (기본값 3000), `--data <dir>` |
@@ -57,6 +96,7 @@ npm run serve -- "$URL"            # http://localhost:3000 접속
   `topics-archived-<시각>/`으로 옮깁니다. `--window`나 범주를 바꿔도 같은
   처리가 일어납니다.
 - `--once`: 끝난 구간만 처리하고 종료합니다(예: 회의 종료 후).
+- `--finalize`: use with `--once` after stopping collection to include the last partial window.
 - `--factcheck`: 의원 발언 속 사실 주장을 웹으로 확인합니다(아래 참고).
   웹 검색을 거치느라 주제당 15~30초쯤 걸려서 기본값은 꺼짐입니다.
 - `--curate`: 새 기록이 들어왔으면 30분마다 전체 주제 목록을 검토해 병합,

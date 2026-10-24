@@ -225,7 +225,7 @@
     if (atBottom) el.scrollTop = el.scrollHeight;
   }
 
-  const stream = new EventSource('/api/live');
+  const stream = new EventSource('api/live');
   stream.onmessage = (e) => {
     lastLineAt = Date.now();
     addLiveLine(JSON.parse(e.data));
@@ -256,7 +256,7 @@
   });
 
   async function refresh() {
-    const res = await fetch('/api/state');
+    const res = await fetch('api/state');
     const s = await res.json();
     lastState = s;
     subject = s.meeting.subject;
