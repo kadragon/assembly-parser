@@ -27,7 +27,7 @@ async function until(fn) {
   }
   assert.fail('condition not reached');
 }
-async function fixture(t) {
+async function fixture(t, options = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'assembly-api-'));
   const collector = path.join(root, 'collector.cjs');
   const summary = path.join(root, 'summary.cjs');
@@ -45,6 +45,7 @@ async function fixture(t) {
     resolveMeeting: async (ids) => metadata(ids),
     worker: (role) => (role === 'collector' ? collector : summary),
     interval: 60000,
+    ...options,
   });
   t.after(async () => {
     await app.close();
@@ -212,6 +213,61 @@ test('unavailable and mismatched metadata start no session', async (t) => {
   ]) {
     app.sessions.resolveMeeting = async (ids) => ({ ...metadata(ids), ...override });
     assert.equal((await app.post('/api/start', { url: player('one') })).status, 400);
+    assert.equal(fs.existsSync(path.join(app.root, 'one')), false);
+  }
+  assert.equal(app.workers().length, 0);
+});
+
+test('catalog API distinguishes empty and failed lookups while direct URL Start keeps working', async (t) => {
+  const calls = [];
+  let result = { checkedAt: 'now', broadcasts: [] };
+  const app = await fixture(t, {
+    listBroadcasts: async (refresh) => {
+      calls.push(refresh);
+      if (result instanceof Error) throw result;
+      return result;
+    },
+  });
+  const catalog = (query = '') => fetch(`${app.origin}/api/catalog${query}`);
+  let res = await catalog();
+  assert.equal(res.status, 200);
+  assert.deepEqual((await res.json()).broadcasts, []);
+  result = {
+    checkedAt: 'now',
+    broadcasts: [
+      { committee: '교육위', subject: '합성', status: '개의', live: true, url: player('one') },
+    ],
+  };
+  res = await catalog('?refresh=1');
+  assert.equal((await res.json()).broadcasts[0].committee, '교육위');
+  assert.deepEqual(calls, [false, true]);
+  result = new Error('upstream timeout');
+  res = await catalog();
+  assert.equal(res.status, 502);
+  assert.match((await res.json()).error, /upstream timeout/);
+  assert.equal((await app.post('/api/start', { url: player('one') })).status, 200);
+  await until(() => app.workers().some((worker) => worker.role === 'collector'));
+});
+
+test('Start revalidates a listed meeting and explains ineligible captions without writes', async (t) => {
+  const app = await fixture(t, {
+    listBroadcasts: async () => ({
+      checkedAt: 'now',
+      broadcasts: [
+        { committee: '교육위', subject: '합성', status: '개의', live: true, url: player('one') },
+      ],
+    }),
+  });
+  const listed = (await (await fetch(`${app.origin}/api/catalog`)).json()).broadcasts[0];
+  for (const [override, reason] of [
+    [{ live: false }, /not live/],
+    [{ smiServer: '' }, /no subtitle server/],
+    [{ smiServer: 'wss://smi.webcast.go.kr' }, /stenographer/],
+  ]) {
+    app.sessions.resolveMeeting = async (ids) => ({ ...metadata(ids), ...override });
+    const res = await app.post('/api/start', { url: listed.url });
+    assert.equal(res.status, 400);
+    assert.match((await res.json()).error, reason);
     assert.equal(fs.existsSync(path.join(app.root, 'one')), false);
   }
   assert.equal(app.workers().length, 0);

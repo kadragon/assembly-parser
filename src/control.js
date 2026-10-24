@@ -138,10 +138,12 @@ export class Sessions {
       meeting.xcode !== ids.xcode ||
       meeting.xcgcd !== ids.xcgcd ||
       typeof meeting.committee !== 'string' ||
-      typeof meeting.subject !== 'string' ||
-      !meeting.live
+      typeof meeting.subject !== 'string'
     )
-      throw new Error('Meeting metadata does not identify a live broadcast');
+      throw new Error('Meeting metadata does not identify this broadcast');
+    // The catalog may be stale; recheck before any write or worker start.
+    if (!meeting.live)
+      throw new Error('This meeting is not live now; refresh the list or choose another meeting');
     aiSubtitleUrl(meeting.smiServer);
     if (existing?.finalizing && existing.summarizer)
       throw new Error('Finalization is running; wait for it to finish before resuming');

@@ -40,7 +40,6 @@ No task authorizes publishing the repository, selecting a license, or deploying 
 
 ## 2-live-broadcast-catalog
 
-- [ ] [FEAT] Choose Assembly broadcasts from a live catalog with direct-URL fallback.
   - Source: [Approved design](docs/design/transcript-generalization.md), Discover
     broadcasts from the existing Assembly contract; delivery item 2.
   - Scope: Server-side catalog fetch, normalized listing, refresh, meeting selection,
@@ -158,7 +157,7 @@ No task authorizes publishing the repository, selecting a license, or deploying 
 
 ## 7-public-release-preparation
 
-- [ ] [DOCS] Deliver a reproducible demo, CI, and public-facing setup documentation. *(blocked by: 2-live-broadcast-catalog)* *(blocked by: 5-subtitle-file-uploads)* *(blocked by: 6-interest-category-editor)*
+- [ ] [DOCS] Deliver a reproducible demo, CI, and public-facing setup documentation. *(blocked by: 5-subtitle-file-uploads)* *(blocked by: 6-interest-category-editor)*
   - Source: [Approved design](docs/design/transcript-generalization.md), Prepare a
     reproducible local release; Testing Decisions; Out of Scope; delivery item 7.
   - Scope: Synthetic fixtures/precomputed demo, one-command quick start, supported

@@ -5,6 +5,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { createCatalog, fetchLiveList } from './catalog.js';
 import { Sessions, validatePort } from './control.js';
 import { acquireLock } from './ownership.js';
 import { snapshot } from './snapshot.js';
@@ -30,7 +31,12 @@ async function payload(req) {
   return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)));
 }
 
-export async function startApp({ root = 'data', port = 3000, ...options } = {}) {
+export async function startApp({
+  root = 'data',
+  port = 3000,
+  listBroadcasts = createCatalog(() => fetchLiveList()),
+  ...options
+} = {}) {
   // Port 0 is reserved for programmatic integration tests, never accepted by the CLI.
   if (port !== 0) validatePort(port);
   const token = randomBytes(32).toString('hex');
@@ -50,6 +56,13 @@ export async function startApp({ root = 'data', port = 3000, ...options } = {}) 
       const url = new URL(req.url, origin);
       if (req.method === 'GET' && url.pathname === '/api/sessions')
         return json(res, 200, { token, sessions: sessions.list(), warnings: sessions.warnings });
+      if (req.method === 'GET' && url.pathname === '/api/catalog') {
+        try {
+          return json(res, 200, await listBroadcasts(url.searchParams.get('refresh') === '1'));
+        } catch (error) {
+          return json(res, 502, { error: `Broadcast list unavailable: ${error.message}` });
+        }
+      }
       if (req.method === 'POST') {
         if (req.headers.origin !== origin || req.headers['x-session-token'] !== token)
           return json(res, 403, { error: 'Same-origin session token required' });
