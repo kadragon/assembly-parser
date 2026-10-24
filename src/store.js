@@ -11,7 +11,12 @@ import { Transcript } from './transcript.js';
  */
 export function meetingDir(arg, root = 'data') {
   const xcgcd = /^https?:/.test(arg) ? parsePlayerUrl(arg).xcgcd : arg;
-  return path.join(root, xcgcd);
+  if (typeof xcgcd !== 'string' || !/^[A-Za-z0-9_-]{1,100}$/.test(xcgcd))
+    throw new Error('Invalid session identifier');
+  const dir = path.resolve(root, xcgcd);
+  if (fs.existsSync(dir) && (fs.lstatSync(dir).isSymbolicLink() || !fs.statSync(dir).isDirectory()))
+    throw new Error('Session must be a real directory');
+  return dir;
 }
 
 export const files = (dir) => ({

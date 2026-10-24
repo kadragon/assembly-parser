@@ -8,6 +8,7 @@ const IDLE_MS = 120_000;
 export function collect(url, { onLine, log = console.log }) {
   let ws;
   let idleTimer;
+  let reconnectTimer;
   let stopped = false;
 
   const resetIdle = () => {
@@ -19,12 +20,15 @@ export function collect(url, { onLine, log = console.log }) {
   };
 
   const connect = () => {
+    if (stopped) return;
     ws = new WebSocket(url, 'echo-protocol');
     ws.addEventListener('open', () => {
+      if (stopped) return;
       log(`subtitle stream connected: ${url}`);
       resetIdle();
     });
     ws.addEventListener('message', (e) => {
+      if (stopped) return;
       if (typeof e.data !== 'string') return;
       resetIdle();
       let msg;
@@ -41,13 +45,14 @@ export function collect(url, { onLine, log = console.log }) {
       clearTimeout(idleTimer);
       if (stopped) return;
       log(`subtitle stream closed, retrying in ${RECONNECT_MS / 1000}s`);
-      setTimeout(connect, RECONNECT_MS);
+      reconnectTimer = setTimeout(connect, RECONNECT_MS);
     });
   };
 
   connect();
   return () => {
     stopped = true;
+    clearTimeout(reconnectTimer);
     clearTimeout(idleTimer);
     ws?.close();
   };

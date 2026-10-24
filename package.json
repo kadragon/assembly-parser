@@ -5,6 +5,7 @@
   "description": "Collect National Assembly webcast AI subtitles and summarize them in 10-minute windows",
   "type": "module",
   "scripts": {
+    "start": "node src/app.js",
     "collect": "node src/collect.js",
     "summarize": "node src/summarize.js",
     "serve": "node src/serve.js",

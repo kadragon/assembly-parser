@@ -4,12 +4,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
+import { validateConfig } from './control.js';
+import { workerLock } from './ownership.js';
 import { files, meetingDir, readJson, readTranscript, writeJson } from './store.js';
 import {
   curateTopics,
   factCheckTopic,
   routeWindow,
   runningJobs,
+  stopModelChildren,
   summarizeTopic,
   summarizeWindow,
   watchJobs,
@@ -43,6 +46,7 @@ const { values, positionals } = parseArgs({
     'focus-keywords': { type: 'string' }, // comma-separated, e.g. 교원대 — hints the router
     'focus-note': { type: 'string' }, // projects of the focus institution, e.g. 부설 장애인 체육 특수학교 설립
     rebuild: { type: 'boolean', default: false }, // discard summaries (topics are archived, not deleted)
+    finalize: { type: 'boolean', default: false },
     once: { type: 'boolean', default: false }, // process closed windows, then exit
     factcheck: { type: 'boolean', default: false }, // web-check members' factual claims (slow, uses web search)
     curate: { type: 'boolean', default: false }, // review the whole topic list and log proposed fixes (not applied yet)
@@ -63,7 +67,18 @@ if (!meeting) {
   process.exit(1);
 }
 
-const windowMinutes = Number(values.window);
+const windowMinutes = validateConfig({ windowMinutes: Number(values.window) }).windowMinutes;
+if (values.finalize && !values.once) throw new Error('--finalize requires --once');
+const release = workerLock(dir, 'summarizer');
+process.on('exit', release);
+const shutdown = () => {
+  stopModelChildren();
+  release();
+  process.exit(0);
+};
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
+process.on('disconnect', shutdown);
 const windowMs = windowMinutes * 60_000;
 // tail of the previous window passed to the window summary, so a statement cut at the boundary has context
 const overlapMs = 60_000;
@@ -351,7 +366,12 @@ const attempts = new Map();
 
 async function tick() {
   const transcript = readTranscript(f.transcript);
-  const starts = closedWindows(transcript.lines(), windowMs, Date.now(), graceMs)
+  const starts = closedWindows(
+    transcript.lines(),
+    windowMs,
+    values.finalize ? Infinity : Date.now(),
+    graceMs,
+  )
     .filter((s) => !state.windows[s]?.summary || !state.windows[s].routed)
     .filter((s) => (attempts.get(s) ?? 0) < MAX_ATTEMPTS);
   // windows go in order: each uses the previous window as context and the topic list so far;
