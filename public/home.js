@@ -191,9 +191,10 @@ async function loadCatalog(refresh = false) {
       ? `${live}개 회의가 생중계 중입니다. ${checked}`
       : `지금은 생중계 중인 회의가 없습니다. ${checked}`;
   } catch (error) {
-    broadcasts = [];
-    catalogList.replaceChildren();
-    catalogStatus.textContent = `생중계 목록을 불러오지 못했습니다. 주소를 직접 입력할 수 있습니다. (${error.message})`;
+    // Keep a list that already loaded; only the refresh failed.
+    catalogStatus.textContent = broadcasts.length
+      ? `목록을 새로 고치지 못해 이전 목록을 표시합니다. (${error.message})`
+      : `생중계 목록을 불러오지 못했습니다. 주소를 직접 입력할 수 있습니다. (${error.message})`;
   } finally {
     refreshButton.disabled = false;
   }

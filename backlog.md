@@ -180,3 +180,9 @@ No task authorizes publishing the repository, selecting a license, or deploying 
     separate decisions; do not claim the repository has been published.
   - Dependencies: 2-live-broadcast-catalog, 5-subtitle-file-uploads,
     6-interest-category-editor, and their transitive prerequisites.
+
+## Review Backlog
+
+### PR #2 — Live broadcast catalog (2026-10-25)
+
+- [ ] [debt] Use the live_list.asp `xsami` subtitle hint to mark caption-ineligible live entries in the catalog once its meaning is confirmed against a live broadcast; Start already revalidates (source: code-review) — src/catalog.js:37

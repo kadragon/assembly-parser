@@ -16,7 +16,12 @@ const entities = {
 // main.js renders these fields as HTML; show them as plain text instead.
 const plain = (value) =>
   text(value)
+    .replace(/<br\s*\/?>/gi, ' ')
     .replace(/<[^>]*>/g, '')
+    .replace(/&#(x[0-9a-f]{1,6}|[0-9]{1,7});/gi, (entity, code) => {
+      const point = code[0].toLowerCase() === 'x' ? parseInt(code.slice(1), 16) : Number(code);
+      return point <= 0x10ffff ? String.fromCodePoint(point) : entity;
+    })
     .replace(/&(amp|lt|gt|quot|#39|nbsp);/g, (entity) => entities[entity])
     .trim();
 
@@ -61,7 +66,8 @@ async function readBounded(res) {
     if (size > MAX_BYTES) throw tooLarge();
     chunks.push(chunk);
   }
-  return Buffer.concat(chunks).toString('utf8');
+  // TextDecoder strips a leading BOM, as res.json() would.
+  return new TextDecoder('utf-8').decode(Buffer.concat(chunks));
 }
 
 export async function fetchLiveList({ fetchImpl = fetch, timeout = 10000 } = {}) {
@@ -73,7 +79,10 @@ export async function fetchLiveList({ fetchImpl = fetch, timeout = 10000 } = {})
       signal: AbortSignal.timeout(timeout),
       redirect: 'error',
     });
-    if (!res.ok) throw new Error(`live_list.asp HTTP ${res.status}`);
+    if (!res.ok) {
+      await res.body?.cancel();
+      throw new Error(`live_list.asp HTTP ${res.status}`);
+    }
     body = await readBounded(res);
   } catch (error) {
     if (error.name === 'TimeoutError') throw new Error('Broadcast list request timed out');
@@ -104,13 +113,14 @@ export function createCatalog(load, { ttl = 30000, minRefresh = 5000, now = Date
     pending = Promise.resolve()
       .then(load)
       .then(
+        // Stamp on settle: a lookup that hung until its timeout must still pause retries.
         (list) => {
-          cached = { ...list, fetchedAt: at };
+          cached = { ...list, fetchedAt: now() };
           failure = null;
           return cached;
         },
         (error) => {
-          failure = { at, error };
+          failure = { at: now(), error };
           throw error;
         },
       )

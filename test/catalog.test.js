@@ -61,6 +61,11 @@ test('malformed live list responses are rejected instead of reported as empty', 
   for (const data of [null, [], 'x', {}, { xlist: 'x' }, { xlist: Array(501).fill(entry({})) }])
     assert.throws(() => normalizeLiveList(data), /Malformed broadcast list/);
   assert.deepEqual(normalizeLiveList({ xlist: [] }).broadcasts, []);
+  assert.equal(
+    normalizeLiveList({ xlist: [entry({ xsubj: '2026년도&#183;예산안<br>심사&#x26;질의' })] })
+      .broadcasts[0].subject,
+    '2026년도·예산안 심사&질의',
+  );
 });
 
 test('live list fetch uses only the fixed endpoint, rejects redirects, HTTP errors and oversized bodies', async () => {
@@ -75,7 +80,21 @@ test('live list fetch uses only the fixed endpoint, rejects redirects, HTTP erro
   assert.equal(`${url.origin}${url.pathname}`, LIVE_LIST_URL);
   assert.equal(calls[0].options.redirect, 'error');
   assert.ok(calls[0].options.signal);
-  await assert.rejects(fetchLiveList({ fetchImpl: respond('', { status: 500 }) }), /HTTP 500/);
+  let errorBodyCancelled = false;
+  const errorBody = new ReadableStream({
+    cancel() {
+      errorBodyCancelled = true;
+    },
+  });
+  await assert.rejects(
+    fetchLiveList({ fetchImpl: respond(errorBody, { status: 503 }) }),
+    /HTTP 503/,
+  );
+  assert.ok(errorBodyCancelled);
+  assert.deepEqual(
+    (await fetchLiveList({ fetchImpl: respond('\uFEFF{"xlist":[]}') })).broadcasts,
+    [],
+  );
   await assert.rejects(fetchLiveList({ fetchImpl: respond('not json') }), /Malformed/);
   await assert.rejects(fetchLiveList({ fetchImpl: respond(' '.repeat(1_000_001)) }), /too large/);
   // A body larger than the limit is cancelled while streaming, not buffered in full.
@@ -135,6 +154,22 @@ test('catalog cache shares requests, rate-limits manual refresh and retries fail
   fail = false;
   clock = 46000;
   assert.equal((await catalog()).checkedAt, '4');
+});
+
+test('a lookup that fails after a long timeout still pauses the next retry', async () => {
+  let clock = 0;
+  let calls = 0;
+  const catalog = createCatalog(
+    async () => {
+      calls++;
+      clock += 10000;
+      throw new Error('upstream timeout');
+    },
+    { ttl: 30000, minRefresh: 5000, now: () => clock },
+  );
+  await assert.rejects(catalog(true), /upstream timeout/);
+  await assert.rejects(catalog(true), /upstream timeout/);
+  assert.equal(calls, 1);
 });
 
 test('a failed manual refresh keeps serving the cached list until its TTL expires', async () => {
