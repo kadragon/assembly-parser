@@ -15,7 +15,7 @@
 <label for="windowMinutes">요약 간격</label><select id="windowMinutes" name="windowMinutes"><option value="5">5분</option><option value="10">10분</option><option value="15">15분</option><option value="30">30분</option><option value="60">60분</option></select>
 <button type="submit" class="primary">수집·요약 시작 <span aria-hidden="true">↗</span></button><p class="hint">자막은 로컬에 저장되며, 요약할 때 Claude로 전송됩니다.</p>
 </form></section>
-<section class="saved" aria-labelledby="saved-title"><div class="section-heading"><span class="number">02</span><h2 id="saved-title">저장된 기록</h2><span id="count"></span></div><p class="hint">수집과 요약 상태를 따로 확인하세요. 여러 세션의 요약은 순서대로 처리합니다.</p><div id="sessions"></div></section>
+<section class="saved" aria-labelledby="saved-title"><div class="section-heading"><span class="number">02</span><h2 id="saved-title">저장된 기록</h2><span id="count"></span></div><p class="hint">수집과 요약 상태를 따로 확인하세요. 여러 세션의 요약은 순서대로 처리합니다.</p><div id="warnings" role="status"></div><div id="sessions"></div></section>
 </div><p id="message" role="status" aria-live="polite"></p>
 </main><footer>국회 기록실 <span>자막은 발언 원문과 다를 수 있습니다.</span></footer>
 </body></html>

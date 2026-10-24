@@ -307,3 +307,10 @@ Claude execution, and browser rendering have not been verified in this planning 
 Existing test success does not establish those integrations or general-input support.
 Public release remains incomplete until a license is selected and release contents
 and external-source usage requirements are reviewed for the actual publication.
+
+### Publication approval update — 2026-10-24
+
+During delivery item 1, the user separately requested a public GitHub repository
+(`github에 public으로`). This authorizes publishing the audited repository as
+`kadragon/assembly-parser`; it does not select a license or mark the remaining
+delivery items complete. Minimal test/lint CI accompanies this publication.

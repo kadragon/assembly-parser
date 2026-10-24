@@ -50,3 +50,11 @@ test('dead owner recovery cannot leave a duplicate owner', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('official legacy player URL forms normalize without allowing foreign origins', () => {
+  for (const url of [
+    'http://assembly.webcast.go.kr/main/player.asp?xcode=58&xcgcd=one',
+    'https://www.assembly.webcast.go.kr/main/player.asp?xcode=58&xcgcd=one#player',
+  ])
+    assert.deepEqual(parsePlayerUrl(url), { xcode: '58', xcgcd: 'one' });
+});

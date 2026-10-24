@@ -95,6 +95,14 @@ function render(sessions) {
       );
     for (const key of ['collectionError', 'summaryError'])
       if (session[key]) card.append(el('p', session[key], 'error'));
+    if (session.collection !== 'running' && session.config)
+      card.append(
+        el(
+          'p',
+          `마지막 구간 마무리는 회의 기록을 끝낼 때 사용하세요. 마무리한 ${session.config.windowMinutes}분 구간이 끝나기 전에는 수집을 재개할 수 없습니다.`,
+          'hint',
+        ),
+      );
     const actions = el('div', '', 'actions');
     const link = el('a', '기록 열기 ↗');
     link.href = `/sessions/${encodeURIComponent(session.id)}/`;
@@ -129,6 +137,12 @@ async function refresh() {
   const data = await res.json();
   token = data.token;
   render(data.sessions);
+  const warnings = document.querySelector('#warnings');
+  warnings.replaceChildren(
+    ...(data.warnings ?? []).map((warning) =>
+      el('p', `읽지 못한 기록이 있습니다. 원본 파일을 확인해 주세요: ${warning}`, 'notice'),
+    ),
+  );
 }
 form.addEventListener('submit', (event) => {
   event.preventDefault();

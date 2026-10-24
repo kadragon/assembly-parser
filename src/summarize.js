@@ -400,7 +400,21 @@ if (focusNote) console.log(`focus note: ${focusNote}`);
 
 if (values.once) {
   await tick();
+  if (values.finalize) {
+    state.finalizedThrough = Math.max(
+      state.finalizedThrough ?? 0,
+      ...Object.values(state.windows)
+        .filter((w) => w.summary && w.routed)
+        .map((w) => w.end),
+    );
+    save();
+  }
   if (values.factcheck) await factCheck();
+  // The parent's IPC channel must not keep a completed one-shot worker alive.
+  if (process.connected) {
+    process.removeListener('disconnect', shutdown);
+    process.disconnect();
+  }
 } else {
   // fact checks run on their own loop so slow web searches never hold up window summaries
   const every = (step, name) => {

@@ -252,3 +252,163 @@ test('server subprocess shutdown kills owned worker descendants', async (t) => {
   assert.equal(fs.existsSync(path.join(root, '.application.lock')), false);
   assert.equal(fs.existsSync(path.join(root, 'one', '.collector.lock')), false);
 });
+
+test('unexpected collector exit releases idle summary ownership for resume', async (t) => {
+  const app = await fixture(t);
+  await app.post('/api/start', { url: player('one') });
+  await until(() => app.sessions.load('one').state.summary === 'idle');
+  app.sessions.load('one').collector.kill('SIGKILL');
+  await until(() => app.sessions.load('one').state.collection === 'error');
+  const response = await app.post('/api/sessions/one/resume');
+  assert.equal(response.status, 200, await response.text());
+  assert.equal(app.sessions.load('one').state.collection, 'running');
+});
+
+test('real once summary workers exit with IPC and allow the next session to run', async (t) => {
+  const app = await fixture(t);
+  const fake = app.sessions.worker;
+  app.sessions.worker = (role) =>
+    role === 'summarizer' ? path.resolve('src/summarize.js') : fake(role);
+  await app.post('/api/start', { url: player('one') });
+  await app.post('/api/start', { url: player('two') });
+  await until(
+    () =>
+      app.sessions.load('one').state.summary === 'idle' &&
+      app.sessions.load('two').state.summary === 'idle',
+  );
+  assert.equal(app.sessions.summary, null);
+  assert.equal(app.sessions.load('one').summarizer, null);
+  assert.equal(app.sessions.load('two').summarizer, null);
+});
+
+test('resuming a finalized current window is refused until it closes', async (t) => {
+  const app = await fixture(t);
+  await app.post('/api/start', { url: player('one') });
+  await app.post('/api/sessions/one/stop');
+  const file = path.join(app.root, 'one', 'state.json');
+  writeJson(file, { windows: {}, finalizedThrough: Date.now() + 60000 });
+  const before = app.workers().length;
+  const refused = await app.post('/api/sessions/one/resume');
+  assert.equal(refused.status, 400);
+  assert.match((await refused.json()).error, /finalized/);
+  assert.equal(app.workers().length, before);
+  writeJson(file, { windows: {}, finalizedThrough: Date.now() - 1 });
+  assert.equal((await app.post('/api/sessions/one/resume')).status, 200);
+});
+
+test('Korean settings survive a UTF-8 character split between request chunks', async (t) => {
+  const app = await fixture(t);
+  const token = (await (await fetch(`${app.origin}/api/sessions`)).json()).token;
+  const body = Buffer.from(
+    JSON.stringify({ url: player('one'), config: { focus: '한국교원대학교' } }),
+  );
+  const split = body.indexOf(Buffer.from('한')) + 1;
+  const result = await new Promise((resolve, reject) => {
+    const req = http.request(
+      `${app.origin}/api/start`,
+      {
+        method: 'POST',
+        headers: {
+          Origin: app.origin,
+          'Content-Type': 'application/json',
+          'X-Session-Token': token,
+        },
+      },
+      (res) => {
+        const chunks = [];
+        res.on('data', (chunk) => chunks.push(chunk));
+        res.on('end', () =>
+          resolve({ status: res.statusCode, data: JSON.parse(Buffer.concat(chunks)) }),
+        );
+      },
+    );
+    req.on('error', reject);
+    req.write(body.subarray(0, split));
+    setTimeout(() => req.end(body.subarray(split)), 30);
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.data.config.focus, '한국교원대학교');
+});
+
+test('unreadable saved entries do not prevent startup or hide valid sessions', async (t) => {
+  const app = await fixture(t);
+  await app.post('/api/start', { url: player('one') });
+  await app.close();
+  for (const id of ['backup.2024', 'broken']) {
+    const dir = path.join(app.root, id);
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, 'meeting.json'), id === 'broken' ? '{broken' : '{}');
+  }
+  const restarted = await startApp({ root: app.root, port: 0 });
+  t.after(() => restarted.close());
+  const result = await (await fetch(`${restarted.origin}/api/sessions`)).json();
+  assert.equal(result.sessions.length, 1);
+  assert.equal(result.sessions[0].id, 'one');
+  assert.equal(result.warnings.length, 2);
+  assert.equal(fs.readFileSync(path.join(app.root, 'broken', 'meeting.json'), 'utf8'), '{broken');
+});
+
+test('stop excludes timer-driven enqueue while waiting for a stubborn collector', async (t) => {
+  const app = await fixture(t);
+  fs.appendFileSync(path.join(app.root, 'collector.cjs'), "process.on('SIGTERM',()=>{});");
+  await app.post('/api/start', { url: player('one') });
+  await until(() => app.sessions.load('one').state.summary === 'idle');
+  const entry = app.sessions.load('one');
+  const stopping = app.sessions.action('one', 'stop');
+  app.sessions.enqueue(entry);
+  await stopping;
+  assert.equal(app.sessions.pending.includes(entry), false);
+  assert.equal(entry.summarizer, null);
+  assert.equal(entry.state.summary, 'stopped');
+  assert.equal(app.workers().filter((worker) => worker.role === 'summary').length, 1);
+});
+
+test('resume cancels queued finalization before restarting collection', async (t) => {
+  const app = await fixture(t);
+  await app.post('/api/start', { url: player('one') });
+  await app.post('/api/sessions/one/stop');
+  fs.writeFileSync(path.join(app.root, 'summary.cjs'), 'setInterval(()=>{},1000);');
+  await app.post('/api/start', { url: player('two') });
+  await app.post('/api/sessions/one/finalize');
+  assert.equal(app.sessions.load('one').finalizing, true);
+  assert.equal((await app.post('/api/sessions/one/resume')).status, 200);
+  assert.equal(app.sessions.load('one').finalizing, false);
+  assert.equal(app.sessions.pending.filter((entry) => entry.id === 'one').length, 1);
+});
+
+test('resume reuses ownership while a normal summary retry is running', async (t) => {
+  const app = await fixture(t);
+  await app.post('/api/start', { url: player('one') });
+  await app.post('/api/sessions/one/stop');
+  fs.writeFileSync(path.join(app.root, 'summary.cjs'), 'setInterval(()=>{},1000);');
+  await app.post('/api/sessions/one/retry');
+  const summary = app.sessions.load('one').summarizer;
+  assert.equal((await app.post('/api/sessions/one/resume')).status, 200);
+  assert.equal(app.sessions.load('one').summarizer, summary);
+  assert.equal(app.sessions.load('one').state.summary, 'running');
+});
+
+test('failed Stop does not permanently block future summary actions', async (t) => {
+  const app = await fixture(t);
+  await app.post('/api/start', { url: player('one') });
+  const original = app.sessions.kill;
+  app.sessions.kill = async () => {
+    throw new Error('synthetic signal failure');
+  };
+  assert.equal((await app.post('/api/sessions/one/stop')).status, 400);
+  app.sessions.kill = original;
+  assert.equal(app.sessions.load('one').stopping, false);
+  assert.equal((await app.post('/api/sessions/one/stop')).status, 200);
+});
+
+test('synchronous worker launch failure is persisted as error and releases acquired locks', async (t) => {
+  const app = await fixture(t);
+  app.sessions.launch = () => {
+    throw new Error('synthetic launch failure');
+  };
+  assert.equal((await app.post('/api/start', { url: player('one') })).status, 400);
+  assert.equal(app.sessions.load('one').state.collection, 'error');
+  assert.match(app.sessions.load('one').state.collectionError, /synthetic launch/);
+  assert.equal(fs.existsSync(path.join(app.root, 'one', '.collector.lock')), false);
+  assert.equal(fs.existsSync(path.join(app.root, 'one', '.summarizer.lock')), false);
+});

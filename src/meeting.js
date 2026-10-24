@@ -4,11 +4,12 @@ const BASE = 'https://assembly.webcast.go.kr/main';
 export function parsePlayerUrl(url) {
   const u = new URL(url);
   if (
-    u.origin !== 'https://assembly.webcast.go.kr' ||
+    !['http:', 'https:'].includes(u.protocol) ||
+    !['assembly.webcast.go.kr', 'www.assembly.webcast.go.kr'].includes(u.hostname) ||
+    u.port ||
     u.pathname !== '/main/player.asp' ||
     u.username ||
-    u.password ||
-    u.hash
+    u.password
   )
     throw new Error('Use an official Assembly player URL');
   const xcode = u.searchParams.get('xcode');

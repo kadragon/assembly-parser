@@ -93,6 +93,7 @@ export class Sessions {
     return { id: entry.id, meeting: entry.meeting, config: entry.config, ...entry.state };
   }
   list() {
+    this.warnings = [];
     if (!fs.existsSync(this.root)) return [];
     return fs
       .readdirSync(this.root, { withFileTypes: true })
@@ -102,7 +103,14 @@ export class Sessions {
           !d.name.startsWith('.') &&
           fs.existsSync(path.join(this.root, d.name, 'meeting.json')),
       )
-      .map((d) => this.view(this.load(d.name)));
+      .flatMap((d) => {
+        try {
+          return [this.view(this.load(d.name))];
+        } catch (error) {
+          this.warnings.push(`${d.name}: ${error.message}`);
+          return [];
+        }
+      });
   }
   save(entry) {
     writeJson(path.join(entry.dir, 'session.json'), { config: entry.config, state: entry.state });
@@ -135,11 +143,20 @@ export class Sessions {
     )
       throw new Error('Meeting metadata does not identify a live broadcast');
     aiSubtitleUrl(meeting.smiServer);
+    if (existing?.finalizing && existing.summarizer)
+      throw new Error('Finalization is running; wait for it to finish before resuming');
+    const finalizedThrough = readJson(files(dir).state)?.finalizedThrough;
+    if (finalizedThrough > Date.now()) {
+      throw new Error(
+        `The current window was finalized; resume after ${new Date(finalizedThrough).toISOString()} to avoid missing new captions in its summary`,
+      );
+    }
     fs.mkdirSync(dir, { recursive: true });
     const release = acquireLock(dir, 'collector');
+    const acquiredSummary = !existing?.summaryRelease;
     let summaryRelease;
     try {
-      summaryRelease = acquireLock(dir, 'summarizer');
+      summaryRelease = existing?.summaryRelease ?? acquireLock(dir, 'summarizer');
     } catch (error) {
       release();
       throw error;
@@ -151,8 +168,10 @@ export class Sessions {
     entry.url = input.url;
     if (entry.state.stoppedAt || entry.state.missedSince)
       entry.state.gap = { from: entry.state.missedSince ?? entry.state.stoppedAt, to: Date.now() };
+    this.pending = this.pending.filter((pending) => pending !== entry);
+    entry.finalizing = false;
     entry.state.collection = 'running';
-    entry.state.summary = 'idle';
+    entry.state.summary = entry.summarizer ? 'running' : 'idle';
     entry.state.startedAt = Date.now();
     entry.state.lastObservedAt = Date.now();
     delete entry.state.collectionError;
@@ -164,8 +183,15 @@ export class Sessions {
       entry.collector = this.launch(entry, 'collector', [input.url, '--data', this.root], release);
       this.enqueue(entry);
     } catch (error) {
+      await this.kill(entry.collector);
       release();
-      summaryRelease();
+      if (acquiredSummary && !entry.summarizer) {
+        summaryRelease();
+        entry.summaryRelease = null;
+      }
+      entry.state.collection = 'error';
+      entry.state.collectionError = error.message;
+      this.save(entry);
       throw error;
     }
     return this.view(entry);
@@ -199,6 +225,10 @@ export class Sessions {
         if (role === 'collector') {
           entry.state.stoppedAt = Date.now();
           entry.state.missedSince = Date.now();
+          if (!entry.summarizer && !this.pending.includes(entry)) {
+            entry.summaryRelease?.();
+            entry.summaryRelease = null;
+          }
         }
         if (role === 'summarizer') {
           this.summary = null;
@@ -217,7 +247,7 @@ export class Sessions {
     return child;
   }
   enqueue(entry, finalizing = false) {
-    if (entry.summarizer || this.pending.includes(entry) || this.closing) return;
+    if (entry.stopping || entry.summarizer || this.pending.includes(entry) || this.closing) return;
     entry.finalizing = finalizing;
     entry.state.summary = 'queued';
     this.pending.push(entry);
@@ -286,16 +316,21 @@ export class Sessions {
       });
     }
     if (action === 'stop') {
-      this.pending = this.pending.filter((e) => e !== entry);
-      await this.kill(entry.collector);
-      await this.kill(entry.summarizer);
-      entry.summaryRelease?.();
-      entry.summaryRelease = null;
-      entry.state.collection = 'stopped';
-      entry.state.summary = 'stopped';
-      entry.state.stoppedAt = Date.now();
-      entry.state.missedSince = Date.now();
-      this.save(entry);
+      entry.stopping = true;
+      try {
+        this.pending = this.pending.filter((e) => e !== entry);
+        await this.kill(entry.collector);
+        await this.kill(entry.summarizer);
+        entry.summaryRelease?.();
+        entry.summaryRelease = null;
+        entry.state.collection = 'stopped';
+        entry.state.summary = 'stopped';
+        entry.state.stoppedAt = Date.now();
+        entry.state.missedSince = Date.now();
+        this.save(entry);
+      } finally {
+        entry.stopping = false;
+      }
     } else if (action === 'retry' || action === 'finalize') {
       if (!entry.config) throw new Error('Legacy session cannot be reconfigured yet');
       if (action === 'finalize' && entry.collector)

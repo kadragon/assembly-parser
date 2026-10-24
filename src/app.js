@@ -20,12 +20,14 @@ const json = (res, status, body) => {
 async function payload(req) {
   if (req.headers['content-type'] !== 'application/json')
     throw new Error('Expected application/json');
-  let data = '';
+  const chunks = [];
+  let size = 0;
   for await (const chunk of req) {
-    data += chunk;
-    if (Buffer.byteLength(data) > 16384) throw new Error('Payload too large');
+    size += chunk.length;
+    if (size > 16384) throw new Error('Payload too large');
+    chunks.push(chunk);
   }
-  return JSON.parse(data);
+  return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)));
 }
 
 export async function startApp({ root = 'data', port = 3000, ...options } = {}) {
@@ -47,7 +49,7 @@ export async function startApp({ root = 'data', port = 3000, ...options } = {}) 
       if (!sessions) return json(res, 503, { error: 'Starting' });
       const url = new URL(req.url, origin);
       if (req.method === 'GET' && url.pathname === '/api/sessions')
-        return json(res, 200, { token, sessions: sessions.list() });
+        return json(res, 200, { token, sessions: sessions.list(), warnings: sessions.warnings });
       if (req.method === 'POST') {
         if (req.headers.origin !== origin || req.headers['x-session-token'] !== token)
           return json(res, 403, { error: 'Same-origin session token required' });

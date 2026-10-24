@@ -82,6 +82,7 @@ test('real summary CLI finalizes current partial window and leaves unchanged out
   const state = JSON.parse(fs.readFileSync(path.join(dir, 'state.json'), 'utf8'));
   assert.ok(state.windows[windowStart(ts, 300000)].summary);
   assert.equal(state.windows[windowStart(ts, 300000)].routed, true);
+  assert.equal(state.finalizedThrough, windowStart(ts, 300000) + 300000);
   assert.equal(fs.readFileSync(log, 'utf8').trim().split('\n').length, 2);
   await run([...args, '--finalize'], env);
   assert.equal(fs.readFileSync(log, 'utf8').trim().split('\n').length, 2);

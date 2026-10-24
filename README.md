@@ -35,7 +35,9 @@ Closing a tab or navigating between sessions does not stop workers. **Stop** sto
 both workers for that session; **Retry summary** leaves collection running;
 **Finalize last window** processes the last partial window after collection stops.
 Server shutdown stops its owned workers and model processes. Restarting the server
-never resumes collection automatically. **Resume collection** displays the missed
+never resumes collection automatically. After finalizing a partial window, resume
+is refused until that window ends, so new captions cannot silently enter an already
+completed summary. **Resume collection** displays the missed
 interval: captions from that interval cannot be retrieved.
 
 Summary workers share one queue across browser sessions. Each worker retains the
@@ -49,7 +51,7 @@ explicit rebuild workflow is available. Legacy records remain viewable. Broadcas
 catalogs, uploads, and category editing are not included yet.
 
 Claude Code must be installed and authenticated for summarization. Although storage
-is local, transcript text is sent to Claude. Summary errors leave collection running;
+is local, transcript text is sent to Claude. Summary errors pause that session until an explicit retry and leave collection running;
 check the session error, fix CLI installation/authentication, then retry.
 
 ### 기존 독립 실행 명령
