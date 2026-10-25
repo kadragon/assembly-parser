@@ -275,11 +275,18 @@ uploadForm.addEventListener('submit', (event) => {
   const fields = Object.fromEntries(new FormData(uploadForm));
   perform(uploadForm.querySelector('button'), async () => {
     if (file.size > 5 * 1024 * 1024) throw new Error('파일이 5MB보다 큽니다.');
+    let content;
+    try {
+      // file.text() would turn a non-UTF-8 file into replacement characters and accept it
+      content = new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer());
+    } catch {
+      throw new Error('UTF-8 파일이 아닙니다. UTF-8로 저장한 뒤 다시 올려 주세요.');
+    }
     await post('/api/upload', {
       id: fields.id,
       title: fields.title,
       config: { windowMinutes: Number(fields.windowMinutes) },
-      content: await file.text(),
+      content,
     });
     uploadForm.reset();
   });

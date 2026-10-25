@@ -94,5 +94,7 @@ export function parseJsonl(content) {
   if (!header) errors.push('file is empty');
   else if (!lines.length && !errors.length) errors.push('file has no transcript records');
   if (errors.length) throw new Error(`Invalid transcript file:\n${errors.join('\n')}`);
-  return { lines, duration: Math.max(...lines.map((l) => l.end ?? l.ts)) };
+  // a loop, not Math.max(...lines): a large file has more cues than a call may take arguments
+  const duration = lines.reduce((max, l) => Math.max(max, l.end ?? l.ts), 0);
+  return { lines, duration };
 }

@@ -120,3 +120,10 @@ test('cues with equal start times keep their file order', () => {
     ['앞', '첫째', '둘째'],
   );
 });
+
+test('a large valid file under the size limit is not rejected by its cue count', () => {
+  const cue = '{"start":0,"text":"a"}';
+  const { lines, duration } = parseJsonl([HEADER, ...Array(150_000).fill(cue)].join('\n'));
+  assert.equal(lines.length, 150_000);
+  assert.equal(duration, 0);
+});

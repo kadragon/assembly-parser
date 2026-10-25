@@ -357,3 +357,16 @@ test('legacy Assembly topics are read through the neutral adapter without being 
   assert.equal(s.topics[0].summary.bullets[0].organization, '교원대');
   assert.deepEqual(fs.readFileSync(file), bytes);
 });
+
+test('every line of a multi-line cue keeps its explicit speaker in the model input', async (t) => {
+  const root = tempRoot(t);
+  const claude = fakeClaude(root);
+  session(
+    root,
+    'multi',
+    [HEADER, JSON.stringify({ start: 0, speaker: '김하늘', text: '첫 줄\n둘째 줄' })].join('\n'),
+  );
+  const result = await summarize('multi', root, claude.env);
+  assert.equal(result.code, 0, result.stderr);
+  assert.ok(claude.calls().some((c) => c.input.includes('[김하늘] 첫 줄\n[김하늘] 둘째 줄')));
+});

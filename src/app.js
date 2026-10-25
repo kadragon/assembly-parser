@@ -31,6 +31,8 @@ async function payload(req, limit = 16384) {
   for await (const chunk of req) {
     size += chunk.length;
     if (size <= limit) chunks.push(chunk);
+    // ...but only up to the largest upload; anything bigger is cut off
+    else if (size > limit + UPLOAD_LIMIT) throw new Error('Payload too large');
   }
   if (size > limit) throw new Error('Payload too large');
   return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)));

@@ -273,7 +273,14 @@ const header = (meeting) =>
   general(meeting)
     ? `자료: ${meeting.title}`
     : `회의: ${meeting.committee} — ${meeting.subject} (${meeting.date})`;
-const caption = (l) => (l.speaker ? `[${l.speaker}] ${l.text}` : l.text);
+// every line of a multi-line cue keeps its speaker, so no line reads as unattributed
+const caption = (l) =>
+  l.speaker
+    ? l.text
+        .split('\n')
+        .map((part) => `[${l.speaker}] ${part}`)
+        .join('\n')
+    : l.text;
 const subtitles = (lines) => `<자막>\n${lines.map(caption).join('\n')}\n</자막>`;
 
 /** before: the last subtitles of the previous window, context only. */
