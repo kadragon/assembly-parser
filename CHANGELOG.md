@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Upload SRT and WebVTT subtitle files into the general-session workflow (2026-10-25) → docs/jsonl-format.md
 - [done] Upload general meeting or lecture JSONL and summarize it on elapsed time (2026-10-25) → docs/jsonl-format.md
 - [done] Detect stale summaries and rebuild with archived prior output (2026-10-25)
 - [done] Choose Assembly broadcasts from a live catalog with direct-URL fallback (2026-10-24)

@@ -235,6 +235,104 @@ test('rejected uploads expose no session, leave no staging files and start no wo
   assert.equal(start.status, 400);
 });
 
+test('SRT meetings and WebVTT lectures go through the same upload and summary pipeline', async (t) => {
+  const root = tempRoot(t);
+  const claude = fakeClaude(root);
+  withEnv(t, claude.env);
+  const first = await app(t, root);
+  for (const [id, name, format] of [
+    ['srt-meeting', 'general-meeting.srt', 'srt'],
+    ['vtt-lecture', 'general-lecture.vtt', 'vtt'],
+  ]) {
+    const res = await first.post('/api/upload', upload(id, fixture(name), { format }));
+    assert.equal(res.status, 200, await res.clone().text());
+  }
+  await until(async () => (await first.sessions()).every((s) => s.summary === 'complete'));
+
+  // the final cue starts at 9:58 (SRT) / 9:59 (VTT) and ends past 10:00: one window, no repeat
+  const meeting = await first.state('srt-meeting');
+  assert.equal(meeting.profile, 'general');
+  assert.equal(meeting.timeBasis, 'elapsed');
+  assert.deepEqual(
+    meeting.windows.map((w) => [w.start, w.lineCount, Boolean(w.summary), w.routed]),
+    [
+      [300_000, 2, true, true],
+      [0, 3, true, true],
+    ],
+  );
+  const lecture = await first.state('vtt-lecture');
+  assert.deepEqual(
+    lecture.windows.map((w) => [w.start, w.lineCount]),
+    [
+      [300_000, 2],
+      [0, 6],
+    ],
+  );
+  assert.deepEqual(
+    lecture.topics[0].entries.map((e) => [e.label, e.speakers]),
+    [
+      ['00:00–00:05', ['강사']],
+      ['00:05–00:10', ['강사']],
+    ],
+  );
+  const meta = JSON.parse(fs.readFileSync(path.join(root, 'vtt-lecture', 'meeting.json'), 'utf8'));
+  assert.equal(meta.format, 'webvtt');
+  assert.equal(meta.duration, 602_000);
+
+  // voice labels reach the model as explicit speakers; SRT text stays unlabeled and markup-free
+  const inputs = claude.calls().map((c) => c.input);
+  assert.ok(inputs.some((i) => i.includes('[질문자] 열과 일은 같은 단위인가요?')));
+  assert.ok(
+    inputs.some((i) => i.includes('지난주 고객 문의는 120건으로\n전주보다 15% 늘었습니다.')),
+  );
+  assert.ok(inputs.every((i) => !/<\/?(?:i|b|v|c)\b/.test(i)));
+
+  const [topic] = lecture.topics;
+  const markdown = fs.readFileSync(
+    path.join(root, 'vtt-lecture', 'topics', `${topic.id}.md`),
+    'utf8',
+  );
+  assert.match(markdown, /### 00:00–00:05 — 강사/);
+
+  await first.close();
+  const second = await app(t, root);
+  assert.deepEqual((await second.sessions()).map((s) => s.collection).sort(), [
+    'imported',
+    'imported',
+  ]);
+});
+
+test('rejected subtitle uploads name the problem line and expose no session', async (t) => {
+  const root = tempRoot(t);
+  const claude = fakeClaude(root);
+  withEnv(t, claude.env);
+  const a = await app(t, root);
+  const listing = () => fs.readdirSync(root).filter((n) => !['bin', 'calls.jsonl'].includes(n));
+  const before = listing();
+  const srt = (text) => upload('sub', text, { format: 'srt' });
+  const vtt = (text) => upload('sub', text, { format: 'vtt' });
+  const cases = [
+    [srt('1\n00:00:0x,000 --> 00:00:01,000\n가\n'), /line 2: invalid start time/],
+    [srt('1\n00:00:05,000 --> 00:00:01,000\n가\n'), /line 2: end is before start/],
+    [srt('1\n00:00:00,000 --> 00:00:01,000\n<i> </i>\n'), /no subtitle cues/],
+    [srt(''), /no subtitle cues/],
+    [srt(fixture('general-lecture.vtt')), /line 1: this looks like a WebVTT file/],
+    [vtt(fixture('general-meeting.srt')), /line 1: WebVTT files must start with "WEBVTT"/],
+    [vtt('WEBVTT\n\nNOTE 메모만\n'), /no subtitle cues/],
+    [upload('sub', fixture('general-meeting.srt')), /line 1: this looks like an SRT file/],
+    [upload('sub', fixture('general-meeting.srt'), { format: 'docx' }), /Unsupported file format/],
+    [upload('sub', fixture('general-meeting.srt'), { format: 'toString' }), /Unsupported/],
+  ];
+  for (const [body, error] of cases) {
+    const res = await a.post('/api/upload', body);
+    assert.equal(res.status, 400, JSON.stringify(body.content.slice(0, 40)));
+    assert.match((await res.json()).error, error);
+  }
+  assert.deepEqual(listing(), before);
+  assert.deepEqual(await a.sessions(), []);
+  assert.equal(claude.calls().length, 0);
+});
+
 // Lays out an uploaded session on disk, as the application does, for direct CLI runs.
 function session(root, id, content) {
   const dir = path.join(root, id);

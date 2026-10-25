@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FORMAT, parseJsonl } from './importer.js';
+import { FORMAT, parseTranscript } from './importer.js';
 import { aiSubtitleUrl, fetchMeeting, parsePlayerUrl } from './meeting.js';
 import { acquireLock } from './ownership.js';
 import { profileOf } from './profile.js';
@@ -11,6 +11,8 @@ import { files, meetingDir, readJson, writeJson } from './store.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const complete = (entry) => entry.meeting?.complete === true;
+// meeting.json records what kind of file an upload came from
+const SOURCE_FORMATS = { jsonl: FORMAT, srt: 'srt', vtt: 'webvtt' };
 export function validatePort(value) {
   if (!/^\d+$/.test(String(value)) || Number(value) < 1 || Number(value) > 65535)
     throw new Error('Port must be an integer from 1 to 65535');
@@ -210,15 +212,16 @@ export class Sessions {
     return this.view(entry);
   }
   /**
-   * Import a whole transcript file as a new, complete general session. The file is validated and
-   * staged under a hidden name first, so a rejected upload never appears in the session list.
+   * Import a whole transcript file (JSONL, SRT or WebVTT) as a new, complete general session. The
+   * file is validated and staged under a hidden name first, so a rejected upload never appears in
+   * the session list.
    */
   upload(input) {
     if (
       !input ||
       typeof input !== 'object' ||
       Array.isArray(input) ||
-      Object.keys(input).some((k) => !['id', 'title', 'config', 'content'].includes(k))
+      Object.keys(input).some((k) => !['id', 'title', 'config', 'content', 'format'].includes(k))
     )
       throw new Error('Invalid upload payload');
     if (typeof input.id !== 'string') throw new Error('Invalid session identifier');
@@ -227,7 +230,8 @@ export class Sessions {
     if (!title || title.length > 200 || [...title].some((c) => c < ' ' || c === '\x7f'))
       throw new Error('Title must be 1 to 200 characters on one line');
     const config = validateConfig(input.config);
-    const { lines, duration } = parseJsonl(input.content);
+    const format = input.format ?? 'jsonl';
+    const { lines, duration } = parseTranscript(input.content, format);
     if (fs.existsSync(dir) || this.entries.has(input.id))
       throw new Error(`Session ${input.id} already exists; choose another session ID`);
     fs.mkdirSync(this.root, { recursive: true });
@@ -236,7 +240,7 @@ export class Sessions {
       writeJson(path.join(staging, 'meeting.json'), {
         version: 1,
         source: 'upload',
-        format: FORMAT,
+        format: SOURCE_FORMATS[format],
         profile: 'general',
         timeBasis: 'elapsed',
         complete: true,

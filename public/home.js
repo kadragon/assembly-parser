@@ -274,6 +274,9 @@ uploadForm.addEventListener('submit', (event) => {
   const file = fileInput.files[0];
   const fields = Object.fromEntries(new FormData(uploadForm));
   perform(uploadForm.querySelector('button'), async () => {
+    // the extension only picks the parser; the server validates the content itself
+    const format = /\.(srt|vtt|jsonl)$/i.exec(file.name)?.[1].toLowerCase();
+    if (!format) throw new Error('.srt, .vtt, .jsonl 파일만 올릴 수 있습니다.');
     if (file.size > 5 * 1024 * 1024) throw new Error('파일이 5MB보다 큽니다.');
     let content;
     try {
@@ -286,6 +289,7 @@ uploadForm.addEventListener('submit', (event) => {
       id: fields.id,
       title: fields.title,
       config: { windowMinutes: Number(fields.windowMinutes) },
+      format,
       content,
     });
     uploadForm.reset();
