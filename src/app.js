@@ -21,6 +21,8 @@ const json = (res, status, body) => {
 };
 // JSON string escaping can double a file's size; the importer enforces the file limit itself.
 const UPLOAD_LIMIT = 2 * MAX_UPLOAD_BYTES + 65536;
+// the largest category list the validator accepts, in UTF-8 Korean, fits with room to spare
+const SETTINGS_LIMIT = 256 * 1024;
 async function payload(req, limit = 16384) {
   if (req.headers['content-type'] !== 'application/json')
     throw new Error('Expected application/json');
@@ -74,11 +76,19 @@ export async function startApp({
         if (req.headers.origin !== origin || req.headers['x-session-token'] !== token)
           return json(res, 403, { error: 'Same-origin session token required' });
         const upload = url.pathname === '/api/upload';
-        const body = await payload(req, upload ? UPLOAD_LIMIT : undefined);
+        const settings = url.pathname === '/api/start' || url.pathname.endsWith('/config');
+        const body = await payload(
+          req,
+          upload ? UPLOAD_LIMIT : settings ? SETTINGS_LIMIT : undefined,
+        );
         let result;
         if (url.pathname === '/api/start')
           result = await sessions.serial(() => sessions.start(body));
         else if (upload) result = await sessions.serial(() => sessions.upload(body));
+        else if (/^\/api\/sessions\/[A-Za-z0-9_-]{1,100}\/config$/.test(url.pathname))
+          result = await sessions.serial(() =>
+            sessions.configure(url.pathname.split('/')[3], body),
+          );
         else {
           const match =
             /^\/api\/sessions\/([A-Za-z0-9_-]{1,100})\/(stop|resume|retry|finalize|rebuild)$/.exec(

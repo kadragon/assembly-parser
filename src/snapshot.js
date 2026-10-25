@@ -35,6 +35,9 @@ export function snapshot(dir) {
     },
     windowMinutes: state.windowMinutes,
     categories: state.categories ?? [],
+    // explicit categories name their fallback; the focus shorthand's is its last one
+    fallback:
+      state.settings?.categories?.find((c) => c.fallback)?.name ?? state.categories?.at(-1) ?? null,
     // topics are current through the last window that went through routing
     topicsUntil: routed.length ? Math.max(...routed) : null,
     // legacy Assembly fields are adapted on read; files on disk are never rewritten

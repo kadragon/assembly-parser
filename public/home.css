@@ -228,6 +228,106 @@ button:disabled {
 #catalog-list button {
   flex: none;
 }
+.category-editor {
+  margin-top: 20px;
+}
+.category-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 7px;
+}
+.category-heading .label {
+  font-size: 13px;
+  font-weight: 700;
+}
+.category-editor > select {
+  margin-bottom: 10px;
+}
+.category-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.category {
+  border: 1px solid var(--line);
+  background: #fffef8;
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+}
+.category-top {
+  display: flex;
+  gap: 8px;
+}
+.category-tools {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+.category-tools button {
+  padding: 6px 10px;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  border: 1px solid var(--line);
+  padding: 6px;
+}
+.chips input {
+  flex: 1 1 140px;
+  width: auto;
+  border: 0;
+  padding: 6px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: #e4e9df;
+  padding-left: 9px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.chip button {
+  border: 0;
+  min-height: 30px;
+  padding: 2px 9px;
+}
+label.fallback {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-weight: 400;
+  font-size: 12px;
+}
+label.fallback input {
+  width: auto;
+  margin: 0;
+}
+.add-category {
+  width: 100%;
+  margin-top: 10px;
+  border-style: dashed;
+}
+.settings-panel {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  background: #f9f8f1;
+}
+.settings-panel label:first-child {
+  margin-top: 0;
+}
+.settings-panel .save {
+  background: var(--green);
+  color: white;
+}
 .session {
   padding: 24px 0;
   border-bottom: 1px solid var(--line);
@@ -331,5 +431,14 @@ footer {
   }
   footer span {
     display: block;
+  }
+  .category-top {
+    flex-wrap: wrap;
+  }
+  .category-tools {
+    width: 100%;
+  }
+  .category-tools button {
+    flex: 1;
   }
 }

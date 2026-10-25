@@ -35,27 +35,45 @@ export function savedSettings(state) {
   return { windowMinutes: state.windowMinutes ?? 5, focus, focusKeywords: [], focusNote: '' };
 }
 
-/**
- * Explicit CLI values override saved settings; omitted ones keep them. Keywords and notes
- * belong to a focus, so a different explicit focus drops the saved ones.
- */
-export function effectiveSettings(saved, flags, identity) {
-  const base = saved ?? { windowMinutes: 5, focus: '', focusKeywords: [], focusNote: '' };
-  const focus = flags.focus ?? base.focus;
-  const keep = focus.trim() === base.focus;
-  const config = validateConfig({
-    windowMinutes: flags.window === undefined ? base.windowMinutes : Number(flags.window),
-    focus,
-    focusKeywords: flags['focus-keywords'] ?? (keep ? base.focusKeywords.join(',') : ''),
-    focusNote: flags['focus-note'] ?? (keep ? base.focusNote : ''),
-  });
+/** Summary settings for a validated configuration; categories are recorded only when set. */
+export function settingsOf(config) {
   return {
     windowMinutes: config.windowMinutes,
     focus: config.focus,
     focusKeywords: keywordList(config.focus, config.focusKeywords),
     focusNote: config.focusNote,
-    ...identity,
+    ...(config.categories && { categories: config.categories }),
   };
+}
+
+const NO_FOCUS = { focus: '', focusKeywords: [], focusNote: '' };
+
+/**
+ * Explicit CLI values override saved settings; omitted ones keep them. Keywords and notes
+ * belong to a focus, so a different explicit focus drops the saved ones. Explicit categories
+ * replace a saved focus and an explicit focus replaces saved categories; giving both is an error.
+ */
+export function effectiveSettings(saved, flags, identity) {
+  const base = saved ?? { windowMinutes: 5, ...NO_FOCUS };
+  let explicit;
+  if (flags.categories !== undefined) {
+    try {
+      explicit = JSON.parse(flags.categories);
+    } catch {}
+    if (!Array.isArray(explicit)) throw new Error('--categories must be a JSON list');
+  }
+  const categories = explicit ?? (flags.focus === undefined ? (base.categories ?? []) : []);
+  const legacy = explicit?.length ? NO_FOCUS : base;
+  const focus = flags.focus ?? legacy.focus;
+  const keep = focus.trim() === legacy.focus;
+  const config = validateConfig({
+    windowMinutes: flags.window === undefined ? base.windowMinutes : Number(flags.window),
+    focus,
+    focusKeywords: flags['focus-keywords'] ?? (keep ? legacy.focusKeywords.join(',') : ''),
+    focusNote: flags['focus-note'] ?? (keep ? legacy.focusNote : ''),
+    categories,
+  });
+  return { ...settingsOf(config), ...identity };
 }
 
 // The STT server re-sends a final with speaker turns split onto "-" lines; only a change in
@@ -74,6 +92,18 @@ const windowName = (dir, start) =>
     ? `${formatElapsed(start)} elapsed`
     : `${minute(start)} UTC`;
 
+// Category lists are long: name them, mark the fallback (*), and say when only details changed.
+const categoryNames = (list) =>
+  list ? list.map((c) => `${c.name}${c.fallback ? '*' : ''}`).join(', ') : '(none)';
+const change = (key, from, to) => {
+  if (key !== 'categories')
+    return `${key} changed: ${JSON.stringify(from)} → ${JSON.stringify(to)}`;
+  const [before, after] = [categoryNames(from), categoryNames(to)];
+  return before === after
+    ? `categories changed: descriptions or keywords of ${after}`
+    : `categories changed: ${before} → ${after}`;
+};
+
 /** Why existing output no longer matches the requested settings or the transcript; [] if it does. */
 export function staleReasons(dir, state, settings, transcript) {
   if (!state) return fs.existsSync(topicsDir(dir)) ? ['topics exist without summary state'] : [];
@@ -83,9 +113,11 @@ export function staleReasons(dir, state, settings, transcript) {
     reasons.push(`state version changed: ${state.version} → ${STATE_VERSION}`);
   // output saved before profiles existed is Assembly output
   const saved = { profile: 'assembly', ...state.settings };
-  for (const reason of Object.keys(settings)
-    .filter((k) => JSON.stringify(saved[k]) !== JSON.stringify(settings[k]))
-    .map((k) => `${k} changed: ${JSON.stringify(saved[k])} → ${JSON.stringify(settings[k])}`))
+  const next = { profile: 'assembly', ...settings };
+  // both sides' keys: categories are recorded only while set
+  for (const reason of [...new Set([...Object.keys(next), ...Object.keys(saved)])]
+    .filter((k) => JSON.stringify(saved[k]) !== JSON.stringify(next[k]))
+    .map((k) => change(k, saved[k], next[k])))
     reasons.push(reason);
   // one pass over the transcript: the snapshot API runs this every second
   const windowMs = state.settings.windowMinutes * 60_000;
