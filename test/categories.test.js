@@ -377,3 +377,53 @@ test('reverting an edit clears the stale status without a rebuild', async (t) =>
   assert.equal(view.summary, 'complete');
   assert.equal(view.staleReasons, undefined);
 });
+
+test('review fixes: null categories, pre-profile output, large settings, restored status, CLI output config', async (t) => {
+  const f = assembly(t, '예산');
+  const rejected = await f.run(['--categories', 'null']);
+  assert.equal(rejected.code, 1);
+  assert.match(rejected.stderr, /JSON list/);
+  assert.equal(fs.existsSync(path.join(f.dir, 'state.json')), false);
+
+  // output summarized before profiles existed is not stale just for lacking one
+  assert.equal((await f.run(flag(CATEGORIES))).code, 0);
+  const file = path.join(f.dir, 'state.json');
+  const state = JSON.parse(fs.readFileSync(file, 'utf8'));
+  delete state.settings.profile;
+  writeJson(file, state);
+  assert.deepEqual(snapshot(f.dir).rebuild.required, []);
+  assert.equal(snapshot(f.dir).fallback, '그외');
+
+  // a CLI-made session offers its recorded settings to the editor
+  const a = await app(t, f.root);
+  const cli = await a.session('one');
+  assert.equal(cli.config, null);
+  assert.deepEqual(
+    cli.outputConfig.categories.map((c) => c.name),
+    ['예산', '인사', '그외'],
+  );
+
+  // the largest descriptions the validator accepts fit in the request
+  const long = CATEGORIES.map((c) => ({ ...c, description: '가'.repeat(2000) }));
+  const big = await a.post('/api/sessions/one/config', {
+    config: { windowMinutes: 5, categories: long },
+  });
+  assert.equal(big.status, 200, await big.clone().text());
+  assert.equal((await big.json()).summary, 'stale');
+
+  // reverting restores the status the edit paused, not a guess
+  const entry = a.sessions.load('one');
+  entry.state.summaryBeforeStale = 'error';
+  const reverted = await a.post('/api/sessions/one/config', {
+    config: { windowMinutes: 5, categories: CATEGORIES },
+  });
+  assert.equal((await reverted.json()).summary, 'error');
+  // a stale status reported by the worker is not lifted by a settings edit
+  entry.state.summary = 'stale';
+  entry.state.staleReasons = 'rebuild required:\n- promptVersion changed: 1 → 2';
+  await a.post('/api/sessions/one/config', { config: { windowMinutes: 5, categories: long } });
+  await a.post('/api/sessions/one/config', {
+    config: { windowMinutes: 5, categories: CATEGORIES },
+  });
+  assert.equal((await a.session('one')).summary, 'stale');
+});

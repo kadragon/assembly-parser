@@ -59,9 +59,8 @@ export function effectiveSettings(saved, flags, identity) {
   if (flags.categories !== undefined) {
     try {
       explicit = JSON.parse(flags.categories);
-    } catch {
-      throw new Error('--categories must be a JSON list');
-    }
+    } catch {}
+    if (!Array.isArray(explicit)) throw new Error('--categories must be a JSON list');
   }
   const categories = explicit ?? (flags.focus === undefined ? (base.categories ?? []) : []);
   const legacy = explicit?.length ? NO_FOCUS : base;
@@ -114,10 +113,11 @@ export function staleReasons(dir, state, settings, transcript) {
     reasons.push(`state version changed: ${state.version} → ${STATE_VERSION}`);
   // output saved before profiles existed is Assembly output
   const saved = { profile: 'assembly', ...state.settings };
+  const next = { profile: 'assembly', ...settings };
   // both sides' keys: categories are recorded only while set
-  for (const reason of [...new Set([...Object.keys(settings), ...Object.keys(saved)])]
-    .filter((k) => JSON.stringify(saved[k]) !== JSON.stringify(settings[k]))
-    .map((k) => change(k, saved[k], settings[k])))
+  for (const reason of [...new Set([...Object.keys(next), ...Object.keys(saved)])]
+    .filter((k) => JSON.stringify(saved[k]) !== JSON.stringify(next[k]))
+    .map((k) => change(k, saved[k], next[k])))
     reasons.push(reason);
   // one pass over the transcript: the snapshot API runs this every second
   const windowMs = state.settings.windowMinutes * 60_000;

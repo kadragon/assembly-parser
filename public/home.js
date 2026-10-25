@@ -256,15 +256,18 @@ function settingsPanel(session) {
   label.htmlFor = id;
   const select = el('select');
   select.id = id;
-  for (const minutes of [5, 10, 15, 30, 60]) {
+  // output made outside the browser starts from the settings recorded with it
+  const config = session.config ?? session.outputConfig;
+  const current = config?.windowMinutes ?? 5;
+  for (const minutes of [...new Set([5, 10, 15, 30, 60, current])].sort((a, b) => a - b)) {
     const option = el('option', `${minutes}분`);
     option.value = String(minutes);
     select.append(option);
   }
-  select.value = String(session.config?.windowMinutes ?? 5);
+  select.value = String(current);
   panel.append(label, select);
   const editor = categoryEditor(panel);
-  editor.load(session.config);
+  editor.load(config);
   editor.options();
   const close = () => {
     panels.delete(session.id);
@@ -321,6 +324,8 @@ async function perform(button, fn) {
 function render(sessions) {
   const signature = JSON.stringify(sessions);
   if (lastRender === signature) return;
+  // moving a panel the user is typing in would drop the cursor; redraw on a later refresh
+  if ([...panels.values()].some((panel) => panel.contains(document.activeElement))) return;
   lastRender = signature;
   container.replaceChildren();
   document.querySelector('#count').textContent = String(sessions.length).padStart(2, '0');

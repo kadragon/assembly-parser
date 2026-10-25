@@ -45,6 +45,22 @@ export function validateConfig(input = {}) {
   return config;
 }
 
+/** Configuration recorded with a session's output; legacy output only implies window and focus. */
+function outputConfig(dir) {
+  const saved = savedSettings(readJson(files(dir).state));
+  return validateConfig(
+    saved
+      ? {
+          windowMinutes: saved.windowMinutes,
+          focus: saved.focus,
+          focusKeywords: saved.focusKeywords.join(','),
+          focusNote: saved.focusNote,
+          categories: saved.categories,
+        }
+      : {},
+  );
+}
+
 export class Sessions {
   constructor(
     root,
@@ -102,7 +118,14 @@ export class Sessions {
     return entry;
   }
   view(entry) {
-    return { id: entry.id, meeting: entry.meeting, config: entry.config, ...entry.state };
+    const view = { id: entry.id, meeting: entry.meeting, config: entry.config, ...entry.state };
+    if (!entry.config) {
+      // what the settings editor starts from for output made outside the browser
+      try {
+        view.outputConfig = outputConfig(entry.dir);
+      } catch {}
+    }
+    return view;
   }
   list() {
     this.warnings = [];
@@ -290,28 +313,40 @@ export class Sessions {
       throw new Error('Invalid settings payload');
     const config = validateConfig(input.config);
     const entry = this.load(id);
-    if (entry.summarizer || this.pending.includes(entry))
-      throw new Error('A summary is running; change settings after it finishes');
     if (JSON.stringify(config) === JSON.stringify(entry.config)) return this.view(entry);
+    entry.config = config;
+    // A running summary still uses the old settings: check once it finishes. A queued one
+    // starts with the new settings and reports stale output itself.
+    if (entry.summarizer) entry.recheck = true;
+    else if (!this.pending.includes(entry)) this.recheck(entry);
+    this.save(entry);
+    return this.view(entry);
+  }
+  /** Compare saved output with the session's settings, without starting a worker. */
+  recheck(entry) {
+    entry.recheck = false;
     const state = readJson(files(entry.dir).state);
-    const reasons = state
+    const reasons = state?.settings
       ? staleReasons(
           entry.dir,
           state,
-          { ...state.settings, categories: undefined, ...settingsOf(config) },
+          // model and prompt changes are the worker's to report
+          { ...state.settings, categories: undefined, ...settingsOf(entry.config) },
           readTranscript(files(entry.dir).transcript),
         )
-      : [];
-    entry.config = config;
+      : state
+        ? ['existing output has no recorded settings (legacy format)']
+        : [];
     if (reasons.length) {
+      if (entry.state.summary !== 'stale') entry.state.summaryBeforeStale = entry.state.summary;
       entry.state.summary = 'stale';
       entry.state.staleReasons = `rebuild required:\n${reasons.map((r) => `- ${r}`).join('\n')}`;
-    } else if (entry.state.summary === 'stale') {
-      entry.state.summary = complete(entry) ? 'complete' : 'idle';
+    } else if (entry.state.summary === 'stale' && entry.state.summaryBeforeStale) {
+      // only a pause this check started is lifted; a worker-reported one waits for a rebuild
+      entry.state.summary = entry.state.summaryBeforeStale;
+      delete entry.state.summaryBeforeStale;
       delete entry.state.staleReasons;
     }
-    this.save(entry);
-    return this.view(entry);
   }
   launch(entry, role, args, release = () => {}) {
     const child = spawn(process.execPath, [this.worker(role), ...args], {
@@ -354,7 +389,11 @@ export class Sessions {
         if (role === 'summarizer') {
           this.summary = null;
           entry.rebuilding = false;
-          if (code !== STALE_EXIT) delete entry.state.staleReasons;
+          if (code !== STALE_EXIT) {
+            delete entry.state.staleReasons;
+            delete entry.state.summaryBeforeStale;
+          }
+          if (entry.recheck && code === 0 && !child.stopping) this.recheck(entry);
           const rebuiltFrom = readJson(files(entry.dir).state)?.rebuiltFrom;
           if (rebuiltFrom) entry.state.lastArchive = rebuiltFrom;
           if (!entry.collector) {
@@ -468,21 +507,7 @@ export class Sessions {
     } else if (action === 'rebuild') {
       if (entry.summarizer) throw new Error('A summary is running; rebuild after it finishes');
       const previous = readJson(files(entry.dir).state);
-      if (!entry.config) {
-        // CLI-made output records its settings; legacy output only implies window and focus
-        const saved = savedSettings(previous);
-        entry.config = validateConfig(
-          saved
-            ? {
-                windowMinutes: saved.windowMinutes,
-                focus: saved.focus,
-                focusKeywords: saved.focusKeywords.join(','),
-                focusNote: saved.focusNote,
-                categories: saved.categories,
-              }
-            : {},
-        );
-      }
+      entry.config ??= outputConfig(entry.dir);
       this.pending = this.pending.filter((e) => e !== entry);
       // a stopped session that had finished keeps its last partial window
       this.enqueue(
