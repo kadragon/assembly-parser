@@ -400,8 +400,17 @@ async function curate({ force = false } = {}) {
   );
 }
 
-// failed tries per window; kept in memory so restarting summarize retries skipped windows
-const attempts = new Map();
+// Failed tries per window. Live sessions keep them in memory so restarting summarize retries
+// skipped windows; an uploaded file is summarized by one-shot runs, so its count is saved with
+// the window and a window that keeps failing is eventually skipped instead of blocking the rest.
+const memory = new Map();
+const attempts = {
+  get: (start) => (complete ? state.windows[start]?.attempts : memory.get(start)),
+  set(start, n) {
+    if (complete) state.windows[start].attempts = n;
+    else memory.set(start, n);
+  },
+};
 
 async function tick() {
   const transcript = readTranscript(f.transcript);
@@ -421,10 +430,14 @@ async function tick() {
     try {
       await processWindow(transcript, start);
       delete state.windows[start].skipped;
+      delete state.windows[start].attempts;
     } catch (err) {
       const n = (attempts.get(start) ?? 0) + 1;
       attempts.set(start, n);
-      if (n < MAX_ATTEMPTS) throw err; // retry next tick, before any later window
+      if (n < MAX_ATTEMPTS) {
+        save();
+        throw err; // retry next tick, before any later window
+      }
       console.error(`${label(start)} failed ${n} times, skipping: ${err.message}`);
       state.windows[start].skipped = true;
       save();

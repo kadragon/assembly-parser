@@ -139,8 +139,9 @@ function spawnClaude(system, prompt, schema, model, tools, timeoutMs) {
       try {
         const envelope = JSON.parse(out);
         if (envelope.is_error || !envelope.structured_output)
+          // only a CLI error is classified; without is_error, result is the model's own text
           throw (
-            explain(null, envelope.result ?? '') ??
+            (envelope.is_error && explain(null, envelope.result ?? '')) ||
             new Error(envelope.result || 'no structured output')
           );
         const error = schemaError(schema, envelope.structured_output);

@@ -389,8 +389,11 @@
     topicsById = new Map(s.topics.map((t) => [t.id, t]));
 
     if (!seen) {
-      // the page path names the session: uploads with the same title must not share marks
-      seenKey = `seen:${location.pathname}:${s.meeting.subject}:${s.meeting.date}`;
+      // uploads with the same title must not share marks, so they are keyed by session path;
+      // Assembly sessions keep their existing key and stored marks
+      seenKey = profile === 'general'
+        ? `seen:${location.pathname}`
+        : `seen:${s.meeting.subject}:${s.meeting.date}`;
       try { seen = JSON.parse(localStorage.getItem(seenKey)); } catch {}
       // first visit: everything already on screen counts as seen
       if (!seen) {

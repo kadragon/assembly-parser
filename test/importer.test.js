@@ -127,3 +127,11 @@ test('a large valid file under the size limit is not rejected by its cue count',
   assert.equal(lines.length, 150_000);
   assert.equal(duration, 0);
 });
+
+test('speaker labels cannot break the one-label-per-line model input', () => {
+  for (const speaker of ['김하늘\n발표자', '[김하늘]', 'a\tb'])
+    assert.throws(
+      () => parseJsonl(file({ start: 0, speaker, text: '가' })),
+      /line 2: speaker must not contain/,
+    );
+});

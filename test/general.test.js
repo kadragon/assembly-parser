@@ -25,6 +25,10 @@ process.stdin.on('data', (d) => (input += d));
 process.stdin.on('end', () => {
   fs.appendFileSync(process.env.CALL_LOG, JSON.stringify({ system, input, schema }) + '\\n');
   const mode = process.env.FAKE_MODE ?? 'ok';
+  if (mode === 'fail' && !schema) {
+    console.error('synthetic window failure');
+    process.exit(1);
+  }
   if (mode === 'auth') {
     console.error('Invalid API key · Please run /login');
     process.exit(1);
@@ -369,4 +373,38 @@ test('every line of a multi-line cue keeps its explicit speaker in the model inp
   const result = await summarize('multi', root, claude.env);
   assert.equal(result.code, 0, result.stderr);
   assert.ok(claude.calls().some((c) => c.input.includes('[김하늘] 첫 줄\n[김하늘] 둘째 줄')));
+});
+
+test('an uploaded window that keeps failing is skipped across one-shot runs', async (t) => {
+  const root = tempRoot(t);
+  const claude = fakeClaude(root, 'fail');
+  const dir = session(root, 'flaky', fixture('general-lecture.jsonl'));
+  const windows = () => JSON.parse(fs.readFileSync(path.join(dir, 'state.json'), 'utf8')).windows;
+  await summarize('flaky', root, claude.env);
+  await summarize('flaky', root, claude.env);
+  assert.equal(windows()[0].attempts, 2);
+  assert.notEqual(windows()[0].skipped, true);
+  await summarize('flaky', root, claude.env);
+  assert.equal(windows()[0].skipped, true);
+  // the next window is no longer blocked by the first
+  assert.equal(windows()[300000].attempts, 1);
+});
+
+test('stale reasons for an uploaded file name the elapsed window, past 24 hours', async (t) => {
+  const root = tempRoot(t);
+  const claude = fakeClaude(root);
+  const day = 24 * 3600_000;
+  const dir = session(
+    root,
+    'late',
+    [HEADER, JSON.stringify({ id: 'a', start: day + 600_000, text: '원문' })].join('\n'),
+  );
+  assert.equal((await summarize('late', root, claude.env)).code, 0);
+  fs.appendFileSync(
+    path.join(dir, 'transcript.jsonl'),
+    `${JSON.stringify({ key: 'id:a', ts: day + 600_000, text: '정정' })}\n`,
+  );
+  const result = await summarize('late', root, claude.env);
+  assert.equal(result.code, 3);
+  assert.match(result.stderr, /captions for 24:10 elapsed window changed/);
 });

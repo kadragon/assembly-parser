@@ -38,6 +38,12 @@ function cueError(record, ids) {
       (typeof record[field] !== 'string' || record[field].length > MAX_LABEL)
     )
       return `${field} must be a string of at most ${MAX_LABEL} characters`;
+  // the speaker is written into the model input as "[name] text" and must stay one label
+  if (
+    record.speaker !== undefined &&
+    [...record.speaker].some((c) => c < ' ' || '[]\x7f'.includes(c))
+  )
+    return 'speaker must not contain line breaks, control characters or brackets';
   if (record.id !== undefined) {
     if (ids.has(record.id)) return `duplicate id ${JSON.stringify(record.id)}`;
     ids.add(record.id);

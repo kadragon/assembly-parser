@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { validateConfig } from './control.js';
+import { formatElapsed, isElapsed } from './profile.js';
 import { readJson, writeJson } from './store.js';
 import { topicsDir } from './topics.js';
 import { windowStart } from './transcript.js';
@@ -67,6 +68,11 @@ export const fingerprint = (lines) =>
     .slice(0, 16);
 
 const minute = (t) => new Date(t).toISOString().slice(11, 16);
+// uploaded files carry elapsed time, which must not be shown as a clock time
+const windowName = (dir, start) =>
+  isElapsed(readJson(path.join(dir, 'meeting.json')))
+    ? `${formatElapsed(start)} elapsed`
+    : `${minute(start)} UTC`;
 
 /** Why existing output no longer matches the requested settings or the transcript; [] if it does. */
 export function staleReasons(dir, state, settings, transcript) {
@@ -95,7 +101,7 @@ export function staleReasons(dir, state, settings, transcript) {
   const last = Math.max(-Infinity, ...done.map((w) => w.start));
   const late = [...byWindow.keys()].filter((s) => s < last && !state.windows[s]);
   for (const start of [...changed.map((w) => w.start), ...late].sort((a, b) => a - b))
-    reasons.push(`captions for ${minute(start)} UTC window changed after it was summarized`);
+    reasons.push(`captions for ${windowName(dir, start)} window changed after it was summarized`);
   return reasons;
 }
 
