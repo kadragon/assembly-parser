@@ -1,14 +1,30 @@
 // Uploaded transcript files, normalized into the line shape the summarizer already reads.
 // The contract is documented in docs/jsonl-format.md.
+import { parseSrt, parseVtt } from './subtitles.js';
+
 export const FORMAT = 'assembly-parser.transcript';
 export const FORMAT_VERSION = 1;
 export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
-const MAX_TEXT = 10_000;
+export const MAX_TEXT = 10_000;
 const MAX_LABEL = 100;
-const MAX_ERRORS = 20;
+export const MAX_ERRORS = 20;
 const CUE_FIELDS = ['start', 'end', 'text', 'speaker', 'id'];
 
 const isTime = (value) => Number.isSafeInteger(value) && value >= 0;
+
+// the speaker is written into the model input as "[name] text" and must stay one label
+export function speakerError(speaker) {
+  if (speaker.length > MAX_LABEL) return `speaker must be at most ${MAX_LABEL} characters`;
+  if ([...speaker].some((c) => c < ' ' || '[]\x7f'.includes(c)))
+    return 'speaker must not contain line breaks, control characters or brackets';
+  return null;
+}
+
+export function checkContent(content) {
+  if (typeof content !== 'string') throw new Error('Transcript file must be text');
+  if (Buffer.byteLength(content) > MAX_UPLOAD_BYTES)
+    throw new Error(`Transcript file is larger than ${MAX_UPLOAD_BYTES / 1024 / 1024} MB`);
+}
 
 const isObject = (value) => value && typeof value === 'object' && !Array.isArray(value);
 
@@ -38,12 +54,8 @@ function cueError(record, ids) {
       (typeof record[field] !== 'string' || record[field].length > MAX_LABEL)
     )
       return `${field} must be a string of at most ${MAX_LABEL} characters`;
-  // the speaker is written into the model input as "[name] text" and must stay one label
-  if (
-    record.speaker !== undefined &&
-    [...record.speaker].some((c) => c < ' ' || '[]\x7f'.includes(c))
-  )
-    return 'speaker must not contain line breaks, control characters or brackets';
+  if (record.speaker !== undefined && speakerError(record.speaker))
+    return speakerError(record.speaker);
   if (record.id !== undefined) {
     if (ids.has(record.id)) return `duplicate id ${JSON.stringify(record.id)}`;
     ids.add(record.id);
@@ -71,9 +83,7 @@ function toLine(record, row) {
  * Throws one error listing every problem by line number; nothing is partially accepted.
  */
 export function parseJsonl(content) {
-  if (typeof content !== 'string') throw new Error('Transcript file must be text');
-  if (Buffer.byteLength(content) > MAX_UPLOAD_BYTES)
-    throw new Error(`Transcript file is larger than ${MAX_UPLOAD_BYTES / 1024 / 1024} MB`);
+  checkContent(content);
   const errors = [];
   const fail = (row, message) => {
     if (errors.length < MAX_ERRORS) errors.push(`line ${row}: ${message}`);
@@ -82,6 +92,16 @@ export function parseJsonl(content) {
   const lines = [];
   const ids = new Set();
   let header = false;
+  // an SRT cue number such as "1" is valid JSON: name the real format instead of every line
+  const first = rows.findIndex((r) => r.trim());
+  const subtitle = /^WEBVTT(?:[ \t]|$)/.test(rows[first])
+    ? 'a WebVTT file; upload it with a .vtt'
+    : rows.slice(first, first + 2).some((r) => r.includes('-->')) &&
+      'an SRT file; upload it with a .srt';
+  if (first >= 0 && subtitle)
+    throw new Error(
+      `Invalid transcript file:\nline ${first + 1}: this looks like ${subtitle} extension`,
+    );
   for (const [i, raw] of rows.entries()) {
     if (!raw.trim()) continue;
     let record;
@@ -103,4 +123,12 @@ export function parseJsonl(content) {
   // a loop, not Math.max(...lines): a large file has more cues than a call may take arguments
   const duration = lines.reduce((max, l) => Math.max(max, l.end ?? l.ts), 0);
   return { lines, duration };
+}
+
+const PARSERS = { jsonl: parseJsonl, srt: parseSrt, vtt: parseVtt };
+
+/** Parse an upload in one of the supported formats: jsonl (default), srt or vtt. */
+export function parseTranscript(content, format = 'jsonl') {
+  if (!Object.hasOwn(PARSERS, format)) throw new Error(`Unsupported file format ${format}`);
+  return PARSERS[format](content);
 }

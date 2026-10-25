@@ -54,16 +54,17 @@ continues; nothing is overwritten until you choose "요약 다시 만들기", wh
 previous `state.json`, `topics/`, and `curation.jsonl` to `archive/<time>/` first.
 Legacy records without recorded settings remain viewable and are rebuilt on request.
 
-**Upload a meeting or lecture**: under "회의·강의 자막 파일 올리기", choose a JSONL
-transcript ([format](docs/jsonl-format.md), up to 5 MB), a title, and a new session ID.
+**Upload a meeting or lecture**: under "회의·강의 자막 파일 올리기", choose an SRT
+(`.srt`), WebVTT (`.vtt`), or JSONL (`.jsonl`) transcript ([formats](docs/jsonl-format.md),
+UTF-8, up to 5 MB), a title, and a new session ID.
 The whole file is validated before the session appears; errors list their line
 numbers and an existing session ID is never overwritten. Uploaded sessions use the
 general profile: times are elapsed from the start of the recording (hours keep
-counting past 24), speakers appear only when the file labels them, and no
+counting past 24), speakers appear only when the file labels them (JSONL `speaker`, WebVTT
+`<v Name>`), and no
 parliamentary titles are added. All windows, including the last partial one, are
 summarized once; there is no live collection to stop or resume. Fact checks and
-curation remain Assembly-only. SRT/WebVTT uploads and category editing are not
-included yet.
+curation remain Assembly-only. Category editing is not included yet.
 
 Claude Code must be installed and authenticated for summarization. Although storage
 is local, transcript text is sent to Claude. Summary errors pause that session until an explicit retry and leave collection running;

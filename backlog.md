@@ -115,7 +115,6 @@ No task authorizes publishing the repository, selecting a license, or deploying 
 
 ## 5-subtitle-file-uploads
 
-- [ ] [FEAT] Upload SRT and WebVTT into the general-session workflow.
   - Source: [Approved design](docs/design/transcript-generalization.md), Normalize
     inputs and make time explicit; delivery item 5.
   - Scope: SRT/WebVTT parsing and format feedback in the existing browser uploader.
@@ -155,7 +154,7 @@ No task authorizes publishing the repository, selecting a license, or deploying 
 
 ## 7-public-release-preparation
 
-- [ ] [DOCS] Deliver a reproducible demo, CI, and public-facing setup documentation. *(blocked by: 5-subtitle-file-uploads)* *(blocked by: 6-interest-category-editor)*
+- [ ] [DOCS] Deliver a reproducible demo, CI, and public-facing setup documentation. *(blocked by: 6-interest-category-editor)*
   - Source: [Approved design](docs/design/transcript-generalization.md), Prepare a
     reproducible local release; Testing Decisions; Out of Scope; delivery item 7.
   - Scope: Synthetic fixtures/precomputed demo, one-command quick start, supported

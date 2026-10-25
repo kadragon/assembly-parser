@@ -1,6 +1,7 @@
 # Transcript JSONL format (version 1)
 
-Uploaded meetings and lectures use this file format. Each line is one JSON object
+Uploaded meetings and lectures use this file format, or [SRT and WebVTT](#srt-and-webvtt),
+which are converted to the same cues. Each line is one JSON object
 (UTF-8; a BOM, CRLF line endings, and blank lines are accepted).
 
 ## Header
@@ -69,3 +70,37 @@ line 7: text must be a non-empty string
 Files over 5 MB, files without cues, duplicate `id` values, and session IDs other than
 1–100 letters, digits, `-`, or `_` are rejected. An existing session ID is never
 overwritten.
+
+## SRT and WebVTT
+
+The browser picks the parser from the file extension (`.srt`, `.vtt`, `.jsonl`); the
+content must match it. Both are read as UTF-8 with an optional BOM and CRLF, CR, or LF
+line endings, and each cue becomes one transcript cue with elapsed `start`/`end`.
+
+- **SRT**: blocks of a cue number, `00:01:02,500 --> 00:01:05,000`, and one or more text
+  lines. A `.` before the milliseconds and hours past 24 are accepted. The cue number is
+  the cue's `id` and must be unique; a block without one is traced by its line number.
+  SRT has no speaker syntax, so its text is never labeled. Formatting tags such as `<i>`
+  or `<font>` and `{\an8}` overrides are removed.
+- **WebVTT**: the file must start with `WEBVTT`. Timestamps are `mm:ss.ttt` or
+  `hh:mm:ss.ttt`; cue settings after the end time (`align:start`, `line:0`, …) are
+  ignored, as are `NOTE`, `STYLE`, and `REGION` blocks. An optional cue identifier is
+  the cue's `id` and must be unique. Voice spans `<v Name>` (and `<v.class Name>`) set the
+  speaker; a cue whose text changes voice is split into one cue per voice, traced as
+  `id/1`, `id/2`, …. Other tags (`<b>`, `<c.class>`, karaoke timestamps) are removed and
+  character references such as `&amp;` are decoded.
+
+Caption markup is never rendered as HTML, speakers are never inferred from text such as
+`김하늘: ...`, and positioning, styling, and regions are not preserved. Errors are reported
+by file line as for JSONL: a malformed timestamp or `end` before `start` at the timing
+line, a cue with no text left after removing markup, a missing timing line, a duplicate
+cue number or identifier, or a file in the other format:
+
+```
+Invalid subtitle file:
+line 6: end is before start
+line 10: cue has no text
+```
+
+Fixtures: [SRT meeting](../test/fixtures/general-meeting.srt),
+[WebVTT lecture](../test/fixtures/general-lecture.vtt).
