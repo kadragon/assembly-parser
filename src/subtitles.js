@@ -98,7 +98,7 @@ function voices(payload) {
     text = '';
   };
   for (const [token] of payload.matchAll(/<[^<>]*>|[^<]+|</g)) {
-    if (token.length < 2 || !token.endsWith('>')) text += token;
+    if (!token.startsWith('<') || !token.endsWith('>') || token.length < 2) text += token;
     else if (/^<\/?v[\s.>]/.test(token)) {
       flush();
       const label = /^<v(?:\.[^\s>]*)?\s+([^>]*)>$/.exec(token)?.[1];
@@ -109,22 +109,21 @@ function voices(payload) {
   return parts;
 }
 
-function push(lines, fail, row, { key, source, start, end, parts }) {
-  if (!parts.length) return fail(row, 'cue has no text');
+// A cue left with no text (a spacer, or markup only) is valid in both formats and is skipped.
+function push(lines, keys, fail, row, { key, source, start, end, parts }) {
+  if (!parts.length) return;
   for (const part of parts) {
     if (part.text.length > MAX_TEXT) return fail(row, `text is longer than ${MAX_TEXT} characters`);
     if (part.speaker !== undefined && speakerError(part.speaker))
       return fail(row, speakerError(part.speaker));
   }
+  // a cue split by voice keeps its source key with the part number
+  const split = parts.map((_, i) => (parts.length > 1 ? `${key}/${i + 1}` : key));
+  const taken = split.find((k) => keys.has(k));
+  if (taken) return fail(row, `cue key ${JSON.stringify(taken)} is used by another cue`);
   parts.forEach((part, i) => {
-    const line = {
-      // a cue split by voice keeps its source key with the part number
-      key: parts.length > 1 ? `${key}/${i + 1}` : key,
-      ts: start,
-      end,
-      text: part.text,
-      source,
-    };
+    keys.add(split[i]);
+    const line = { key: split[i], ts: start, end, text: part.text, source };
     if (part.speaker) line.speaker = part.speaker;
     lines.push(line);
   });
@@ -144,23 +143,20 @@ export function parseSrt(content) {
     fail(first.row, 'this looks like a JSONL transcript; upload it with a .jsonl extension');
     return finish([]);
   }
-  const lines = [];
-  const numbers = new Set();
+  const cues = [];
   for (const { row, rows } of all) {
-    const at = rows[0].includes('-->') ? 0 : 1;
-    const number = at ? rows[0].trim() : undefined;
-    if (at && (!/^\d+$/.test(number) || !rows[1]?.includes('-->'))) {
+    const at = rows[0].includes('-->') ? 0 : rows[1]?.includes('-->') ? 1 : -1;
+    if (at === 1 && !/^\d+$/.test(rows[0].trim()))
       fail(row, `expected a cue number and a timing line such as ${SRT_EXAMPLE}`);
-      continue;
-    }
-    let valid = true;
-    if (number !== undefined) {
-      if (numbers.has(number)) {
-        fail(row, `duplicate cue number ${number}`);
-        valid = false;
-      }
-      numbers.add(number);
-    }
+    else if (at >= 0) cues.push({ row, at, rows });
+    // a blank line inside cue text splits the block; the rest still belongs to that cue
+    else if (cues.length) cues.at(-1).rows.push(...rows);
+    else fail(row, `expected a cue number and a timing line such as ${SRT_EXAMPLE}`);
+  }
+  const lines = [];
+  const keys = new Set();
+  for (const { row, at, rows } of cues) {
+    const number = at ? rows[0].trim() : undefined;
     const times = timing(rows[at], row + at, SRT_TIME, fail);
     // SRT has no voice syntax: text stays unlabeled; drop HTML-like tags and {\an8} overrides
     const text = tidy(
@@ -170,10 +166,12 @@ export function parseSrt(content) {
         .replace(/<\/?[A-Za-z][^<>]*>/g, '')
         .replace(/\{\\[^{}]*\}/g, ''),
     );
-    if (!times || !valid) continue;
-    push(lines, fail, row + at, {
-      key: number !== undefined ? `id:${number}` : `#${row}`,
-      source: number ?? row,
+    if (!times) continue;
+    // numbering often restarts in joined files: a repeated number falls back to the position
+    const numbered = number !== undefined && !keys.has(`id:${number}`);
+    push(lines, keys, fail, row + at, {
+      key: numbered ? `id:${number}` : `#${row}`,
+      source: numbered ? number : row,
       ...times,
       parts: text ? [{ text }] : [],
     });
@@ -194,8 +192,12 @@ export function parseVtt(content) {
     );
     return finish([]);
   }
+  // the header ends at a timing line even without a blank line before the first cue
+  const inHeader = header.rows.findIndex((r) => r.includes('-->'));
+  if (inHeader > 0) rest.unshift({ row: header.row + inHeader, rows: header.rows.slice(inHeader) });
   const lines = [];
   const ids = new Set();
+  const keys = new Set();
   for (const { row, rows } of rest) {
     if (/^(?:NOTE|STYLE|REGION)(?:[ \t]|$)/.test(rows[0])) continue;
     const at = rows[0].includes('-->') ? 0 : 1;
@@ -221,7 +223,7 @@ export function parseVtt(content) {
           fail(row + at, speakerError(p.speaker));
       continue;
     }
-    push(lines, fail, row + at, {
+    push(lines, keys, fail, row + at, {
       key: id !== undefined ? `id:${id}` : `#${row}`,
       source: id ?? row,
       ...times,

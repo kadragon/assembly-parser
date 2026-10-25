@@ -104,9 +104,7 @@ test('malformed SRT cues are reported by line and nothing is accepted', () => {
     '00:00:61,000 --> 00:01:02,000',
     '라',
     '',
-    'just text',
-    '',
-    '4',
+    'x1',
     '00:00:08,000 --> 00:00:09,000',
     '마',
   ].join('\n');
@@ -116,13 +114,81 @@ test('malformed SRT cues are reported by line and nothing is accepted', () => {
       assert.match(error.message, /^Invalid subtitle file:/);
       assert.match(error.message, /line 2: invalid end time "00:00:0x,000"/);
       assert.match(error.message, /line 6: end is before start/);
-      assert.match(error.message, /line 10: cue has no text/);
+      assert.doesNotMatch(error.message, /line 10/);
       assert.match(error.message, /line 14: invalid start time "00:00:61,000"/);
       assert.match(error.message, /line 17: expected a cue number and a timing line/);
-      assert.match(error.message, /line 19: duplicate cue number 4/);
       return true;
     },
   );
+  assert.throws(
+    () => parseTranscript('stray\n\n1\n00:00:00,000 --> 00:00:01,000\n가\n', 'srt'),
+    /line 1: expected a cue number/,
+  );
+});
+
+test('real-world SRT quirks: empty cues, blank lines in text and restarted numbering', () => {
+  const { lines } = parseTranscript(
+    [
+      '1',
+      '00:00:01,000 --> 00:00:03,000',
+      '첫 줄',
+      '',
+      '둘째 줄',
+      '',
+      '2',
+      '00:00:03,000 --> 00:00:03,010',
+      ' ',
+      '',
+      '1',
+      '00:00:04,000 --> 00:00:05,000',
+      '<i></i>',
+      '',
+      '1',
+      '00:00:06,000 --> 00:00:07,000',
+      '이어 붙인 파일',
+    ].join('\n'),
+    'srt',
+  );
+  assert.deepEqual(
+    lines.map((l) => [l.key, l.text]),
+    [
+      ['id:1', '첫 줄\n둘째 줄'],
+      ['#15', '이어 붙인 파일'],
+    ],
+  );
+  assert.throws(
+    () => parseTranscript('1\n00:00:00,000 --> 00:00:01,000\n<b></b>\n', 'srt'),
+    /no subtitle cues/,
+  );
+});
+
+test('WebVTT quirks: a cue right after the header, empty cues, text ending in ">" and split-key collisions', () => {
+  const { lines } = parseTranscript(
+    'WEBVTT\n00:00.000 --> 00:05.000\n안녕하세요\n\n00:05.000 --> 00:05.010 align:start\n \n\n00:06.000 --> 00:07.000\n방향 >\n',
+    'vtt',
+  );
+  assert.deepEqual(
+    lines.map((l) => [l.key, l.text]),
+    [
+      ['#2', '안녕하세요'],
+      ['#8', '방향 >'],
+    ],
+  );
+  assert.throws(
+    () =>
+      parseTranscript(
+        'WEBVTT\n\na\n00:00.000 --> 00:01.000\n<v A>가</v><v B>나</v>\n\na/1\n00:02.000 --> 00:03.000\n다\n',
+        'vtt',
+      ),
+    /line 8: cue key "id:a\/1" is used by another cue/,
+  );
+});
+
+test('JSONL text containing an arrow is not mistaken for SRT', () => {
+  const { lines } = parseTranscript(
+    '{"format":"assembly-parser.transcript","version":1}\n{"start":0,"text":"A --> B 순서로 진행"}',
+  );
+  assert.equal(lines[0].text, 'A --> B 순서로 진행');
 });
 
 test('malformed WebVTT cues and voice labels are reported by line', () => {

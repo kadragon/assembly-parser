@@ -314,7 +314,7 @@ test('rejected subtitle uploads name the problem line and expose no session', as
   const cases = [
     [srt('1\n00:00:0x,000 --> 00:00:01,000\n가\n'), /line 2: invalid start time/],
     [srt('1\n00:00:05,000 --> 00:00:01,000\n가\n'), /line 2: end is before start/],
-    [srt('1\n00:00:00,000 --> 00:00:01,000\n<i> </i>\n'), /line 2: cue has no text/],
+    [srt('1\n00:00:00,000 --> 00:00:01,000\n<i> </i>\n'), /no subtitle cues/],
     [srt(''), /no subtitle cues/],
     [srt(fixture('general-lecture.vtt')), /line 1: this looks like a WebVTT file/],
     [vtt(fixture('general-meeting.srt')), /line 1: WebVTT files must start with "WEBVTT"/],

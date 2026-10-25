@@ -96,7 +96,9 @@ export function parseJsonl(content) {
   const first = rows.findIndex((r) => r.trim());
   const subtitle = /^WEBVTT(?:[ \t]|$)/.test(rows[first])
     ? 'a WebVTT file; upload it with a .vtt'
-    : rows.slice(first, first + 2).some((r) => r.includes('-->')) &&
+    : rows
+        .slice(first, first + 2)
+        .some((r) => r.includes('-->') && !r.trimStart().startsWith('{')) &&
       'an SRT file; upload it with a .srt';
   if (first >= 0 && subtitle)
     throw new Error(
