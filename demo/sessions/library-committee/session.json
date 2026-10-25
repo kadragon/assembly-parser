@@ -1,0 +1,32 @@
+{
+  "config": {
+    "windowMinutes": 5,
+    "focus": "",
+    "focusKeywords": "",
+    "focusNote": "",
+    "categories": [
+      {
+        "name": "시설·공사",
+        "description": "리모델링 공사, 공간 이전, 접근성, 안전 시설",
+        "keywords": ["리모델링", "엘리베이터", "착공"],
+        "fallback": false
+      },
+      {
+        "name": "예산",
+        "description": "예산 요구액, 자료 구입비, 인건비, 설계비",
+        "keywords": ["예산", "구입비"],
+        "fallback": false
+      },
+      {
+        "name": "그외",
+        "description": "운영 프로그램, 일정, 기타 안건",
+        "keywords": [],
+        "fallback": true
+      }
+    ]
+  },
+  "state": {
+    "collection": "imported",
+    "summary": "complete"
+  }
+}
