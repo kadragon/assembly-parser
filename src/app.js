@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { createCatalog, fetchLiveList } from './catalog.js';
 import { Sessions, validatePort } from './control.js';
+import { MAX_UPLOAD_BYTES } from './importer.js';
 import { acquireLock } from './ownership.js';
 import { snapshot } from './snapshot.js';
 
@@ -18,16 +19,22 @@ const json = (res, status, body) => {
   });
   res.end(JSON.stringify(body));
 };
-async function payload(req) {
+// JSON string escaping can double a file's size; the importer enforces the file limit itself.
+const UPLOAD_LIMIT = 2 * MAX_UPLOAD_BYTES + 65536;
+async function payload(req, limit = 16384) {
   if (req.headers['content-type'] !== 'application/json')
     throw new Error('Expected application/json');
   const chunks = [];
   let size = 0;
+  // Keep reading past the limit without storing: a browser still sending a large file would
+  // otherwise see a connection reset instead of the error.
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > 16384) throw new Error('Payload too large');
-    chunks.push(chunk);
+    if (size <= limit) chunks.push(chunk);
+    // ...but only up to twice the endpoint's own limit; anything bigger is cut off
+    else if (size > 2 * limit) throw new Error('Payload too large');
   }
+  if (size > limit) throw new Error('Payload too large');
   return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)));
 }
 
@@ -66,10 +73,12 @@ export async function startApp({
       if (req.method === 'POST') {
         if (req.headers.origin !== origin || req.headers['x-session-token'] !== token)
           return json(res, 403, { error: 'Same-origin session token required' });
-        const body = await payload(req);
+        const upload = url.pathname === '/api/upload';
+        const body = await payload(req, upload ? UPLOAD_LIMIT : undefined);
         let result;
         if (url.pathname === '/api/start')
           result = await sessions.serial(() => sessions.start(body));
+        else if (upload) result = await sessions.serial(() => sessions.upload(body));
         else {
           const match =
             /^\/api\/sessions\/([A-Za-z0-9_-]{1,100})\/(stop|resume|retry|finalize|rebuild)$/.exec(

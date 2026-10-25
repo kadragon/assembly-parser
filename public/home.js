@@ -13,6 +13,13 @@ const labels = {
   error: '오류',
   complete: '마무리 완료',
   stale: '다시 만들기 필요',
+  imported: '파일 업로드됨',
+};
+// Uploaded files are complete recordings: no live collection, gaps, resume or finalize.
+const uploaded = (session) => session.meeting.profile === 'general';
+const elapsed = (ms) => {
+  const m = Math.floor(ms / 60000);
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 };
 const time = (value) => new Date(value).toLocaleString('ko-KR');
 function el(tag, text, className) {
@@ -57,13 +64,23 @@ function render(sessions) {
   for (const session of sessions) {
     const card = el('article', '', 'session');
     card.append(
-      el('div', `${session.meeting.committee} · ${session.meeting.date ?? ''}`, 'meta'),
+      el(
+        'div',
+        uploaded(session)
+          ? `업로드한 자막 · 길이 ${elapsed(session.meeting.duration ?? 0)} · 자막 ${session.meeting.cues ?? 0}개`
+          : `${session.meeting.committee} · ${session.meeting.date ?? ''}`,
+        'meta',
+      ),
       el('h3', session.meeting.subject),
     );
     const statuses = el('div', '', 'statuses');
     statuses.append(
       el('span', `수집 · ${labels[session.collection] ?? session.collection}`, 'badge'),
-      el('span', `요약 · ${labels[session.summary] ?? session.summary}`, 'badge'),
+      el(
+        'span',
+        `요약 · ${uploaded(session) && session.summary === 'complete' ? '완료' : (labels[session.summary] ?? session.summary)}`,
+        'badge',
+      ),
     );
     card.append(statuses);
     if (session.config)
@@ -114,7 +131,7 @@ function render(sessions) {
           'hint',
         ),
       );
-    if (session.collection !== 'running' && session.config)
+    if (session.collection !== 'running' && session.config && !uploaded(session))
       card.append(
         el(
           'p',
@@ -127,17 +144,20 @@ function render(sessions) {
     link.href = `/sessions/${encodeURIComponent(session.id)}/`;
     actions.append(link);
     const rebuildable = session.summary === 'stale' || !session.config;
+    const busy = ['running', 'queued'].includes(session.summary);
     for (const [action, title] of [
-      ...(session.collection === 'running'
-        ? [
-            ['stop', '중지'],
-            ['retry', '요약 재시도'],
-          ]
-        : [
-            ['resume', '수집 재개'],
-            ['retry', '요약 재시도'],
-            ['finalize', '마지막 구간 마무리'],
-          ]),
+      ...(uploaded(session)
+        ? [busy ? ['stop', '요약 중지'] : ['retry', '요약 재시도']]
+        : session.collection === 'running'
+          ? [
+              ['stop', '중지'],
+              ['retry', '요약 재시도'],
+            ]
+          : [
+              ['resume', '수집 재개'],
+              ['retry', '요약 재시도'],
+              ['finalize', '마지막 구간 마무리'],
+            ]),
       ...(rebuildable ? [['rebuild', '요약 다시 만들기']] : []),
     ]) {
       if (!session.config && !['stop', 'rebuild'].includes(action)) continue;
@@ -231,6 +251,45 @@ form.addEventListener('submit', (event) => {
   const { url, ...config } = fields;
   config.windowMinutes = Number(config.windowMinutes);
   perform(form.querySelector('button'), () => post('/api/start', { url, config }));
+});
+const uploadForm = document.querySelector('#upload-form');
+const fileInput = document.querySelector('#file');
+// The file name only suggests a title and ID; the server never uses it as a path.
+fileInput.addEventListener('change', () => {
+  const file = fileInput.files[0];
+  if (!file) return;
+  const stem = file.name.replace(/\.[^.]*$/, '');
+  const title = document.querySelector('#title');
+  const id = document.querySelector('#session-id');
+  if (!title.value) title.value = stem.slice(0, 200);
+  if (!id.value)
+    id.value =
+      stem
+        .replace(/[^A-Za-z0-9_-]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 100) || `upload-${new Date().toISOString().slice(0, 10)}`;
+});
+uploadForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  const file = fileInput.files[0];
+  const fields = Object.fromEntries(new FormData(uploadForm));
+  perform(uploadForm.querySelector('button'), async () => {
+    if (file.size > 5 * 1024 * 1024) throw new Error('파일이 5MB보다 큽니다.');
+    let content;
+    try {
+      // file.text() would turn a non-UTF-8 file into replacement characters and accept it
+      content = new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer());
+    } catch {
+      throw new Error('UTF-8 파일이 아닙니다. UTF-8로 저장한 뒤 다시 올려 주세요.');
+    }
+    await post('/api/upload', {
+      id: fields.id,
+      title: fields.title,
+      config: { windowMinutes: Number(fields.windowMinutes) },
+      content,
+    });
+    uploadForm.reset();
+  });
 });
 refresh().catch((error) => {
   message.textContent = error.message;

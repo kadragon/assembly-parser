@@ -157,8 +157,10 @@
 
   <div class="layout">
     <div>
-      <h2>진행 중인 구간 <span id="current-time" class="time"></span></h2>
-      <div class="card" id="live"><p class="empty">아직 자막이 없습니다.</p></div>
+      <section id="live-block">
+        <h2>진행 중인 구간 <span id="current-time" class="time"></span></h2>
+        <div class="card" id="live"><p class="empty">아직 자막이 없습니다.</p></div>
+      </section>
 
       <h2 id="summaries-title">구간 요약</h2>
       <div id="windows"><p class="empty">구간이 끝나면 요약이 표시됩니다.</p></div>
@@ -174,7 +176,17 @@
 <script>
   const fmt = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false });
   const clock = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-  const range = (s, e) => `${fmt.format(s)}–${fmt.format(e)}`;
+  // Assembly captions carry wall-clock time; uploaded files carry elapsed time from their start,
+  // shown as HH:MM with hours counting past 24.
+  let elapsed = false;
+  let profile = 'assembly';
+  let complete = false;
+  const elapsedHm = (ms) => {
+    const m = Math.floor(ms / 60000);
+    return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  };
+  const hm = (t) => (elapsed ? elapsedHm(t) : fmt.format(t));
+  const range = (s, e) => `${hm(s)}–${hm(e)}`;
   const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   // Minimal markdown: **bold**, "- " bullets, paragraphs.
@@ -240,6 +252,13 @@
   let lastLineAt = null;
   function renderFeed() {
     const el = document.getElementById('feed');
+    // a completed file is not a live stream: no idle-caption warning
+    if (complete) {
+      el.className = 'feed';
+      el.textContent = `파일 기록${lastState?.duration != null ? ` · 길이 ${elapsedHm(lastState.duration)}` : ''}`;
+      el.title = '';
+      return;
+    }
     if (!lastLineAt) return;
     const sec = Math.max(0, Math.round((Date.now() - lastLineAt) / 1000));
     const stale = sec >= 60;
@@ -263,12 +282,17 @@
     const res = await fetch('api/state');
     const s = await res.json();
     lastState = s;
+    elapsed = s.timeBasis === 'elapsed';
+    profile = s.profile ?? 'assembly';
+    complete = Boolean(s.complete);
+    document.getElementById('live-block').hidden = complete;
     subject = s.meeting.subject;
     updateTitle();
     if (s.lastLineAt) lastLineAt = Math.max(lastLineAt ?? 0, s.lastLineAt);
     renderFeed();
     document.getElementById('subject').textContent = s.meeting.subject;
-    document.getElementById('committee').textContent = `${s.meeting.committee} · ${s.meeting.date}`;
+    document.getElementById('committee').textContent =
+      profile === 'general' ? '업로드한 자막 · 일반 회의·강의' : `${s.meeting.committee} · ${s.meeting.date}`;
     document.getElementById('summaries-title').textContent = `${s.windowMinutes}분 구간 요약`;
 
     live.windowMs = s.windowMinutes * 60_000;
@@ -331,7 +355,8 @@
   // Filter by one member or institution: { kind: 'member' | 'inst', value }.
   let filter = null;
   try { filter = JSON.parse(localStorage.getItem('filter')); } catch {}
-  const filterField = { member: 'members', inst: 'institutions' };
+  // pills read the neutral fields; the server adapts legacy members/institutions on read
+  const filterField = { member: 'speakers', inst: 'organizations' };
   const matches = (entries) => !filter || entries.some((e) => (e[filterField[filter.kind]] ?? []).includes(filter.value));
 
   function setFilter(next) {
@@ -364,7 +389,11 @@
     topicsById = new Map(s.topics.map((t) => [t.id, t]));
 
     if (!seen) {
-      seenKey = `seen:${s.meeting.subject}:${s.meeting.date}`;
+      // uploads with the same title must not share marks, so they are keyed by session path;
+      // Assembly sessions keep their existing key and stored marks
+      seenKey = profile === 'general'
+        ? `seen:${location.pathname}`
+        : `seen:${s.meeting.subject}:${s.meeting.date}`;
       try { seen = JSON.parse(localStorage.getItem(seenKey)); } catch {}
       // first visit: everything already on screen counts as seen
       if (!seen) {
@@ -378,7 +407,7 @@
     updateTitle();
 
     const lastSeen = (t) => t.entries.at(-1)?.end ?? t.created;
-    const until = s.topicsUntil ? ` · ${fmt.format(s.topicsUntil)}까지` : '';
+    const until = s.topicsUntil ? ` · ${hm(s.topicsUntil)}까지` : '';
     const groups = s.categories.map((cat, i) => {
       const list = s.topics.filter((t) => t.category === cat && matches(t.entries))
         .sort((a, b) => isMinor(a) - isMinor(b) || lastSeen(b) - lastSeen(a));
@@ -387,7 +416,7 @@
         return `
           <button class="topic-row${isMinor(t) ? ' minor' : ''}" data-topic="${t.id}" aria-expanded="${open}">
             <span class="chev">›</span><span class="title">${esc(t.title)}${markOf(t)}<span class="pills">${pills(...topicPeople(t.entries))}</span></span>
-            <span class="meta">기록 ${t.entries.length}${t.factcheck?.checks.length ? ` · 검증 ${t.factcheck.checks.length}` : ''} · 최근 ${fmt.format(lastSeen(t))}</span>
+            <span class="meta">기록 ${t.entries.length}${t.factcheck?.checks.length ? ` · 검증 ${t.factcheck.checks.length}` : ''} · 최근 ${hm(lastSeen(t))}</span>
           </button>
           ${open ? topicDetail(t) : ''}`;
       }).join('');
@@ -410,25 +439,26 @@
     el.innerHTML = `<span>필터</span>${pill(filter.kind, filter.value)}<span class="meta" style="margin:0">주제 ${topics}개 · 구간 ${windows}개</span><button data-clear-filter>✕ 해제 (Esc)</button>`;
   }
 
-  // Member and institution pills. Institutions first: "which school" is read before "who asked".
+  // Speaker and organization pills. Organizations first: "which school" is read before "who asked".
+  // Only Assembly speakers are legislators; general speakers keep the name from the file.
   function pill(kind, value) {
     const on = filter && filter.kind === kind && filter.value === value;
-    const text = kind === 'member' ? `${value} 위원` : value;
+    const text = kind === 'member' && profile === 'assembly' ? `${value} 위원` : value;
     return `<span class="pill ${kind}${on ? ' active' : ''}" data-filter="${kind}" data-value="${esc(value)}" title="${on ? '필터 해제' : '이 항목만 보기'}">${esc(text)}</span>`;
   }
-  function pills(members = [], institutions = []) {
-    return [...institutions.map((i) => pill('inst', i)), ...members.map((m) => pill('member', m))].join('');
+  function pills(speakers = [], organizations = []) {
+    return [...organizations.map((i) => pill('inst', i)), ...speakers.map((m) => pill('member', m))].join('');
   }
   // this window's entries across its topics
   const windowEntries = (w) => (w.topics ?? []).map((id) => topicsById.get(id)?.entries.find((e) => e.start === w.start)).filter(Boolean);
   const uniq = (xs) => [...new Set(xs)];
-  const topicPeople = (entries) => [uniq(entries.flatMap((e) => e.members ?? [])), uniq(entries.flatMap((e) => e.institutions ?? []))];
+  const topicPeople = (entries) => [uniq(entries.flatMap((e) => e.speakers ?? [])), uniq(entries.flatMap((e) => e.organizations ?? []))];
 
   // hideInst: the topic has a single institution, already shown on its row
   function summaryHtml(sum, hideInst = false) {
     if (!sum.bullets) return md(sum.text ?? '');
     const items = sum.bullets.map((b) => `
-      <li><span class="tag">${esc(b.tag)}</span>${pills(b.member ? [b.member] : [], b.institution && !hideInst ? [b.institution] : [])}${esc(b.text)}</li>`).join('');
+      <li><span class="tag">${esc(b.tag)}</span>${pills(b.speaker ? [b.speaker] : [], b.organization && !hideInst ? [b.organization] : [])}${esc(b.text)}</li>`).join('');
     return `<p><strong>핵심</strong>: ${esc(sum.core)}</p><ul class="bullets">${items}</ul>`;
   }
 
@@ -454,17 +484,17 @@
       const last = runs.at(-1);
       if (last && last.end === e.start) {
         last.end = e.end;
-        last.members = uniq([...last.members, ...(e.members ?? [])]);
-        last.institutions = uniq([...last.institutions, ...(e.institutions ?? [])]);
+        last.speakers = uniq([...last.speakers, ...(e.speakers ?? [])]);
+        last.organizations = uniq([...last.organizations, ...(e.organizations ?? [])]);
         last.notes += `\n${e.notes}`;
       } else {
-        runs.push({ start: e.start, end: e.end, members: e.members ?? [], institutions: e.institutions ?? [], notes: e.notes });
+        runs.push({ start: e.start, end: e.end, speakers: e.speakers ?? [], organizations: e.organizations ?? [], notes: e.notes });
       }
     }
     return runs;
   }
   const entriesHtml = (t) => entryRuns(t.entries).map((r) => `
-      <div class="entry"><span class="time">${range(r.start, r.end)}</span><span class="pills">${pills(r.members, r.institutions)}</span><div class="summary">${md(r.notes)}</div></div>`).join('');
+      <div class="entry"><span class="time">${range(r.start, r.end)}</span><span class="pills">${pills(r.speakers, r.organizations)}</span><div class="summary">${md(r.notes)}</div></div>`).join('');
 
   function topicDetail(t) {
     const entries = entriesHtml(t);
@@ -472,7 +502,7 @@
       <div class="topic-detail">
         <div class="detail-actions"><button class="share" data-share="topic" data-id="${t.id}">이미지로 공유</button></div>
         ${t.description ? `<p class="desc">${esc(t.description)}</p>` : ''}
-        ${isMinor(t) ? '' : `<h3>요약${t.summary ? ` · ${fmt.format(t.summary.until)}까지` : ''}</h3>
+        ${isMinor(t) ? '' : `<h3>요약${t.summary ? ` · ${hm(t.summary.until)}까지` : ''}</h3>
         <div class="summary">${t.summary ? summaryHtml(t.summary, topicPeople(t.entries)[1].length <= 1) : '<p class="empty">요약 생성 중…</p>'}</div>`}
         ${t.factcheck?.checks.length ? `<h3>팩트체크 · 웹 검색 기반, 참고용</h3>${checksHtml(t.factcheck.checks)}` : ''}
         <h3>구간별 기록</h3>
@@ -486,7 +516,7 @@
     const chip = (w, id) => {
       const t = topicsById.get(id);
       if (!t) return '';
-      const members = t.entries.find((e) => e.start === w.start)?.members ?? [];
+      const members = t.entries.find((e) => e.start === w.start)?.speakers ?? [];
       const who = members.length ? `<span class="who"> · ${members.map(esc).join(', ')}</span>` : '';
       return `<button class="badge${t.category === primary ? '' : ' other'}" data-topic="${t.id}">${esc(t.title)}${who}</button>`;
     };
@@ -497,7 +527,7 @@
       if (!w.summary) return w.error ? `<p class="error">요약 실패, ${retry} (${esc(w.error)})</p>${routeErr}` : '<p class="pending"><span class="spinner"></span>요약 중…</p>';
       if (routeErr) return md(w.summary) + routeErr;
       const core = w.summary.split('\n').find((l) => l.includes('**핵심**'));
-      if (filter || !core || w.end > Date.now() - 3_600_000) return md(w.summary);
+      if (filter || !core || elapsed || w.end > Date.now() - 3_600_000) return md(w.summary);
       return expanded.has(w.start)
         ? `${md(w.summary)}<button class="more" data-expand="${w.start}">접기</button>`
         : `${md(core)}<button class="more" data-expand="${w.start}">펼치기</button>`;
@@ -529,7 +559,8 @@
   }
 
   function shareCard(s, title, sub, body) {
-    const meeting = [s.meeting.committee, s.meeting.date].filter(Boolean).join(' · ');
+    const meeting = profile === 'general' ? '업로드한 자막' : [s.meeting.committee, s.meeting.date].filter(Boolean).join(' · ');
+    const source = profile === 'general' ? '업로드한 자막 파일' : '국회 의사중계 AI 자막';
     return `
       <div class="share-card">
         <div class="sc-meeting">${esc(meeting)}</div>
@@ -537,7 +568,7 @@
         <div class="sc-title">${title}</div>
         ${sub ? `<div class="sc-sub">${sub}</div>` : ''}
         ${body}
-        <div class="sc-foot">국회 의사중계 AI 자막을 자동 요약한 내용으로, 실제 발언과 다를 수 있습니다.</div>
+        <div class="sc-foot">${source}을 자동 요약한 내용으로, 실제 발언과 다를 수 있습니다.</div>
       </div>`;
   }
 
@@ -551,10 +582,10 @@
   function topicShare(s, t) {
     const [members, institutions] = topicPeople(t.entries);
     const first = t.entries[0], last = t.entries.at(-1);
-    const span = first ? ` · ${fmt.format(first.start)}–${fmt.format(last.end)} · 기록 ${t.entries.length}` : '';
+    const span = first ? ` · ${range(first.start, last.end)} · 기록 ${t.entries.length}` : '';
     // same sections as the open topic on screen: summary, fact checks, per-window entries
     const summary = isMinor(t) || !t.summary ? ''
-      : `<h3>요약 · ${fmt.format(t.summary.until)}까지</h3><div class="summary">${summaryHtml(t.summary, institutions.length <= 1)}</div>`;
+      : `<h3>요약 · ${hm(t.summary.until)}까지</h3><div class="summary">${summaryHtml(t.summary, institutions.length <= 1)}</div>`;
     const checks = t.factcheck?.checks.length ? `<h3>팩트체크 · 웹 검색 기반, 참고용</h3>${checksHtml(t.factcheck.checks)}` : '';
     const entries = entriesHtml(t);
     const body = `${summary}${checks}<h3>구간별 기록</h3>${entries}`;
@@ -600,8 +631,9 @@
     const t = kind === 'topic' && topicsById.get(id);
     if (!w && !t) return;
     if (!window.htmlToImage) return toast('이미지 모듈을 불러오지 못했습니다.');
-    const hm = (ms) => fmt.format(ms).replace(':', '');
-    const base = w ? `${s.meeting.date}_${hm(w.start)}-${hm(w.end)}_구간요약` : `${s.meeting.date}_주제_${t.title}`;
+    const compact = (ms) => hm(ms).replace(':', '');
+    const prefix = profile === 'general' ? s.meeting.subject : s.meeting.date;
+    const base = w ? `${prefix}_${compact(w.start)}-${compact(w.end)}_구간요약` : `${prefix}_주제_${t.title}`;
     const name = `${base.replace(/[\\/:*?"<>|()\s]+/g, '_')}.png`;
     const host = document.createElement('div');
     host.id = 'share-host';

@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { organizationsOf, speakerLabel, speakersOf } from './profile.js';
 import { readJson, writeJson } from './store.js';
 import { summaryToText } from './summarizer.js';
 
@@ -11,6 +12,7 @@ import { summaryToText } from './summarizer.js';
  * topic = { id, category, title, description, created,
  *           entries: [{ start, end, label, notes, members, institutions }],
  *           summary: { core, bullets: [{ tag, member, institution, text }], until } | null,
+ * General sessions store speakers/organizations and speaker/organization instead.
  *           factcheck?: { until, checks: [{ member, claim, verdict, explanation, sides: [{ who, view, sources }], sources: [{ title, url }] }] } }
  */
 export const topicsDir = (dir) => path.join(dir, 'topics');
@@ -64,21 +66,21 @@ export function pendingFactCheck(topic) {
   return topic.entries.filter((e) => e.end > until && e.members?.length);
 }
 
-export function saveTopic(dir, topic, fmtTime) {
+export function saveTopic(dir, topic, fmtTime, profile = 'assembly') {
   const tdir = topicsDir(dir);
   fs.mkdirSync(tdir, { recursive: true });
   writeJson(path.join(tdir, `${topic.id}.json`), topic);
-  fs.writeFileSync(path.join(tdir, `${topic.id}.md`), toMarkdown(topic, fmtTime));
+  fs.writeFileSync(path.join(tdir, `${topic.id}.md`), toMarkdown(topic, fmtTime, profile));
 }
 
-function toMarkdown(topic, fmtTime) {
+function toMarkdown(topic, fmtTime, profile) {
   const out = [`# ${topic.title}`, '', `${topic.category} · 처음 등장 ${fmtTime(topic.created)}`];
   if (topic.description) out.push('', topic.description);
   const people = (e) =>
-    [...(e.members ?? []).map((m) => `${m} 위원`), ...(e.institutions ?? [])].join(' · ');
+    [...speakersOf(e).map((m) => speakerLabel(m, profile)), ...organizationsOf(e)].join(' · ');
   const all = {
-    members: [...new Set(topic.entries.flatMap((e) => e.members ?? []))],
-    institutions: [...new Set(topic.entries.flatMap((e) => e.institutions ?? []))],
+    speakers: [...new Set(topic.entries.flatMap(speakersOf))],
+    organizations: [...new Set(topic.entries.flatMap(organizationsOf))],
   };
   if (people(all)) out.push('', people(all));
   if (topic.summary)
