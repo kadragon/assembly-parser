@@ -179,6 +179,15 @@ button:disabled {
 .primary:hover {
   background: #163c30;
 }
+.upload {
+  margin-top: 40px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+.upload h3 {
+  font-size: 14px;
+  margin: 0;
+}
 .catalog {
   border: 1px solid var(--line);
   background: #fffef8;

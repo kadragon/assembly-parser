@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { workerLock } from './ownership.js';
+import { formatElapsed, isElapsed, profileOf } from './profile.js';
 import {
   archiveOutput,
   effectiveSettings,
@@ -79,6 +80,19 @@ if (!meeting) {
 }
 
 if (values.finalize && !values.once) throw new Error('--finalize requires --once');
+const profile = profileOf(meeting);
+// fact checks search the public web and curation is tuned to Assembly topics
+if (profile !== 'assembly' && (values.factcheck || values.curate)) {
+  console.error('--factcheck and --curate are only available for Assembly sessions');
+  process.exit(1);
+}
+// an uploaded file is complete: every populated window is due, independent of the clock
+const complete = meeting.complete === true;
+// general output names speakers and organizations; Assembly keeps its legacy field names
+const fields =
+  profile === 'assembly'
+    ? { people: 'members', organizations: 'institutions' }
+    : { people: 'speakers', organizations: 'organizations' };
 const release = workerLock(dir, 'summarizer');
 process.on('exit', release);
 // everything below runs as the session's only summary writer
@@ -87,6 +101,7 @@ if (resumed) console.log(`completed interrupted rebuild; previous output in ${re
 const settings = effectiveSettings(resumed?.settings ?? savedSettings(readJson(f.state)), values, {
   model: MODEL,
   promptVersion: PROMPT_VERSION,
+  profile,
 });
 const { windowMinutes, focus, focusKeywords, focusNote: savedNote } = settings;
 const shutdown = () => {
@@ -155,12 +170,12 @@ const fmt = new Intl.DateTimeFormat('ko-KR', {
   minute: '2-digit',
   hour12: false,
 });
-const fmtTime = (t) => fmt.format(t);
+const fmtTime = (t) => (isElapsed(meeting) ? formatElapsed(t) : fmt.format(t));
 const label = (start) => `${fmtTime(start)}–${fmtTime(start + windowMs)}`;
 
 const topics = new Map(loadTopics(dir).map((t) => [t.id, t]));
-const persist = (topic) => saveTopic(dir, topic, fmtTime);
-// names seen so far, so members and institutions keep one spelling each
+const persist = (topic) => saveTopic(dir, topic, fmtTime, profile);
+// names seen so far, so speakers and organizations keep one spelling each
 const seen = (field) => [
   ...new Set([...topics.values()].flatMap((t) => t.entries.flatMap((e) => e[field] ?? []))),
 ];
@@ -176,7 +191,10 @@ async function settle(tasks) {
 /** Record routed items into topic files, creating topics the router asked for. */
 function applyRouting(w, items) {
   const touched = new Map();
-  const knownInstitutions = seen('institutions');
+  const knownOrganizations = seen(fields.organizations);
+  // Assembly institution names have known variants ("교원대학교" / "교원대"); others are kept as given
+  const canonical = (name) =>
+    profile === 'assembly' ? canonicalInstitution(name, knownOrganizations) : name;
   for (const item of items) {
     let topic = topics.get(item.topic_id);
     if (!topic) {
@@ -203,14 +221,14 @@ function applyRouting(w, items) {
       }
     }
     // several items for one topic in the same window become one entry
-    const acc = touched.get(topic.id) ?? { notes: [], members: new Set(), institutions: new Set() };
+    const acc = touched.get(topic.id) ?? { notes: [], people: new Set(), organizations: new Set() };
     acc.notes.push(item.notes);
     // the chair calling the next speaker is not that member's remark
-    if (topic.title !== PROCEDURAL) for (const m of item.members) acc.members.add(m);
-    for (const name of item.institutions) {
-      const inst = canonicalInstitution(name, knownInstitutions);
-      if (!knownInstitutions.includes(inst)) knownInstitutions.push(inst);
-      acc.institutions.add(inst);
+    if (topic.title !== PROCEDURAL) for (const m of item[fields.people]) acc.people.add(m);
+    for (const name of item[fields.organizations]) {
+      const org = canonical(name);
+      if (!knownOrganizations.includes(org)) knownOrganizations.push(org);
+      acc.organizations.add(org);
     }
     touched.set(topic.id, acc);
   }
@@ -221,8 +239,8 @@ function applyRouting(w, items) {
       end: w.end,
       label: label(w.start),
       notes: acc.notes.join('\n'),
-      members: [...acc.members],
-      institutions: [...acc.institutions],
+      [fields.people]: [...acc.people],
+      [fields.organizations]: [...acc.organizations],
     });
     persist(topic);
   }
@@ -291,8 +309,8 @@ async function processWindow(transcript, start) {
         previousItems,
         hint,
         focusNote,
-        knownMembers: seen('members'),
-        knownInstitutions: seen('institutions'),
+        knownPeople: seen(fields.people),
+        knownOrganizations: seen(fields.organizations),
       }).then(
         (items) => {
           applyRouting(w, items);
@@ -335,9 +353,10 @@ async function updateTopics() {
       previous,
       entries: previous ? entries : topic.entries,
     });
-    const known = seen('institutions');
-    for (const b of summary.bullets)
-      if (b.institution) b.institution = canonicalInstitution(b.institution, known);
+    const known = seen(fields.organizations);
+    if (profile === 'assembly')
+      for (const b of summary.bullets)
+        if (b.institution) b.institution = canonicalInstitution(b.institution, known);
     topic.summary = { ...summary, until: topic.entries.at(-1).end };
     persist(topic);
   });
@@ -391,7 +410,7 @@ async function tick() {
   const starts = closedWindows(
     transcript.lines(),
     windowMs,
-    values.finalize ? Infinity : Date.now(),
+    values.finalize || complete ? Infinity : Date.now(),
     graceMs,
   )
     .filter((s) => !state.windows[s]?.summary || !state.windows[s].routed)

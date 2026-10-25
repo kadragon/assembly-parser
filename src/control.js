@@ -2,12 +2,15 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { FORMAT, parseJsonl } from './importer.js';
 import { aiSubtitleUrl, fetchMeeting, parsePlayerUrl } from './meeting.js';
 import { acquireLock } from './ownership.js';
+import { profileOf } from './profile.js';
 import { STALE_EXIT, savedSettings } from './rebuild.js';
 import { files, meetingDir, readJson, writeJson } from './store.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+const complete = (entry) => entry.meeting?.complete === true;
 export function validatePort(value) {
   if (!/^\d+$/.test(String(value)) || Number(value) < 1 || Number(value) > 65535)
     throw new Error('Port must be an integer from 1 to 65535');
@@ -129,6 +132,8 @@ export class Sessions {
     const config = validateConfig(input.config);
     const dir = this.dir(ids.xcgcd);
     const existing = fs.existsSync(files(dir).meeting) ? this.load(ids.xcgcd) : null;
+    if (existing && profileOf(existing.meeting) !== 'assembly')
+      throw new Error('This session was uploaded from a file and has no live broadcast');
     if (existing?.collector) {
       // New settings never touch saved output: the next summary run reports it as stale
       // and waits for an explicit rebuild while collection goes on.
@@ -202,6 +207,62 @@ export class Sessions {
       this.save(entry);
       throw error;
     }
+    return this.view(entry);
+  }
+  /**
+   * Import a whole transcript file as a new, complete general session. The file is validated and
+   * staged under a hidden name first, so a rejected upload never appears in the session list.
+   */
+  upload(input) {
+    if (
+      !input ||
+      typeof input !== 'object' ||
+      Array.isArray(input) ||
+      Object.keys(input).some((k) => !['id', 'title', 'config', 'content'].includes(k))
+    )
+      throw new Error('Invalid upload payload');
+    if (typeof input.id !== 'string') throw new Error('Invalid session identifier');
+    const dir = this.dir(input.id);
+    const title = typeof input.title === 'string' ? input.title.trim() : '';
+    if (!title || title.length > 200 || [...title].some((c) => c < ' ' || c === '\x7f'))
+      throw new Error('Title must be 1 to 200 characters on one line');
+    const config = validateConfig(input.config);
+    const { lines, duration } = parseJsonl(input.content);
+    if (fs.existsSync(dir) || this.entries.has(input.id))
+      throw new Error(`Session ${input.id} already exists; choose another session ID`);
+    fs.mkdirSync(this.root, { recursive: true });
+    const staging = fs.mkdtempSync(path.join(this.root, `.upload-${input.id}-`));
+    try {
+      writeJson(path.join(staging, 'meeting.json'), {
+        version: 1,
+        source: 'upload',
+        format: FORMAT,
+        profile: 'general',
+        timeBasis: 'elapsed',
+        complete: true,
+        title,
+        committee: '',
+        subject: title,
+        date: '',
+        importedAt: new Date().toISOString(),
+        cues: lines.length,
+        duration,
+      });
+      fs.writeFileSync(
+        path.join(staging, 'transcript.jsonl'),
+        lines.map((line) => `${JSON.stringify(line)}\n`).join(''),
+      );
+      writeJson(path.join(staging, 'session.json'), {
+        config,
+        state: { collection: 'imported', summary: 'idle' },
+      });
+      fs.renameSync(staging, dir);
+    } catch (error) {
+      fs.rmSync(staging, { recursive: true, force: true });
+      throw error;
+    }
+    const entry = this.load(input.id);
+    this.enqueue(entry, true);
     return this.view(entry);
   }
   launch(entry, role, args, release = () => {}) {
@@ -329,6 +390,7 @@ export class Sessions {
   async action(id, action) {
     const entry = this.load(id);
     if (action === 'resume') {
+      if (complete(entry)) throw new Error('Uploaded sessions have no live collection to resume');
       if (!entry.config) throw new Error('Use URL entry to configure this session');
       return this.start({
         url: `https://assembly.webcast.go.kr/main/player.asp?xcode=${encodeURIComponent(entry.meeting.xcode)}&xcgcd=${encodeURIComponent(id)}`,
@@ -343,10 +405,13 @@ export class Sessions {
         await this.kill(entry.summarizer);
         entry.summaryRelease?.();
         entry.summaryRelease = null;
-        entry.state.collection = 'stopped';
         entry.state.summary = 'stopped';
-        entry.state.stoppedAt = Date.now();
-        entry.state.missedSince = Date.now();
+        // an uploaded file has nothing left to collect, so nothing can be missed
+        if (!complete(entry)) {
+          entry.state.collection = 'stopped';
+          entry.state.stoppedAt = Date.now();
+          entry.state.missedSince = Date.now();
+        }
         this.save(entry);
       } finally {
         entry.stopping = false;
@@ -370,12 +435,16 @@ export class Sessions {
       }
       this.pending = this.pending.filter((e) => e !== entry);
       // a stopped session that had finished keeps its last partial window
-      this.enqueue(entry, !entry.collector && Boolean(previous?.finalizedThrough), true);
+      this.enqueue(
+        entry,
+        complete(entry) || (!entry.collector && Boolean(previous?.finalizedThrough)),
+        true,
+      );
     } else if (action === 'retry' || action === 'finalize') {
       if (!entry.config) throw new Error('Legacy session cannot be reconfigured yet');
       if (action === 'finalize' && entry.collector)
         throw new Error('Stop collection before finalizing');
-      this.enqueue(entry, action === 'finalize');
+      this.enqueue(entry, action === 'finalize' || complete(entry));
     } else throw new Error('Unknown action');
     return this.view(entry);
   }

@@ -1,11 +1,9 @@
-import { spawn } from 'node:child_process';
+import { clean, runClaude } from './runner.js';
 
-export const MODEL = process.env.SUMMARY_MODEL || 'haiku';
+export { clean, MODEL, runningJobs, stopModelChildren, watchJobs } from './runner.js';
 // bump when a prompt or output schema change makes earlier summaries incomparable
 export const PROMPT_VERSION = 1;
 const FACTCHECK_MODEL = process.env.FACTCHECK_MODEL || 'sonnet';
-// a hung CLI call would otherwise hold the summary loop forever
-const TIMEOUT_MS = 3 * 60_000;
 const FACTCHECK_TIMEOUT_MS = 10 * 60_000;
 
 const SOURCE_NOTE = `입력은 국회 인터넷의사중계의 AI 음성인식 자막입니다. 오탈자와 잘못 인식된 단어가 있으니 문맥으로 바로잡아 이해하되, 자막에 없는 사실은 지어내지 마세요.
@@ -142,112 +140,126 @@ export function memberName(name) {
 
 const uniq = (xs) => [...new Set(xs.map((x) => String(x).trim()).filter(Boolean))];
 
+// General profile: uploaded meetings and lectures. Speakers come only from explicit labels in
+// the file, never from parliamentary roles; fact checks and curation stay Assembly-only.
+const GENERAL_SOURCE_NOTE = `입력은 회의·강의 자막 파일입니다. 음성인식 자막이면 오탈자가 있을 수 있으니 문맥으로 바로잡아 이해하되, 자막에 없는 사실은 지어내지 마세요.
+줄 앞의 [이름]은 자막 파일에 적힌 화자입니다. 화자 표시가 없는 발언의 화자를 추측하지 말고, 자막에 없는 직함·소속을 붙이지 마세요.`;
+
+const GENERAL_WINDOW_SYSTEM = `당신은 회의·강의를 구간별로 요약하는 기록관입니다.
+${GENERAL_SOURCE_NOTE}
+${MARKDOWN_NOTE}
+${TERSE_NOTE}
+
+출력 형식:
+**핵심**: 이 구간의 핵심을 30자 안팎 명사구로
+- 주요 설명·논의·질문과 답, 결정 사항 불릿 2~5개
+발언이 거의 없거나 쉬는 시간이면 "**핵심**: 휴식" 처럼 한 줄만 쓰세요.
+
+구간은 경과 시간으로 기계적으로 잘려 있어 발언이 중간에 끊길 수 있습니다.
+- <직전 자막>은 앞 구간 끝부분입니다. 이번 구간 첫머리가 무엇에 이어지는지 파악하는 데만 쓰고, 그 내용 자체는 요약하지 마세요.
+- 구간 끝에서 설명이나 논의가 끝나지 않고 끊겼으면 그 불릿 끝에 "(다음 구간에 이어짐)"을 붙이세요.`;
+
+const generalRouteSystem = (
+  categories,
+  focusNote,
+) => `당신은 회의·강의 기록을 주제별로 분류해 정리하는 기록관입니다.
+${GENERAL_SOURCE_NOTE}
+
+이번 구간의 내용을 주제 단위 항목으로 나누고, 각 항목을 어느 주제에 기록할지 정합니다.
+- 한 설명·논의 흐름은 한 항목입니다. 같은 주제에 해당하는 내용은 한 항목으로 합치세요.
+- 기존 주제와 같은 사안이면 그 주제의 id를 topic_id에 넣으세요. 직전 구간에서 이어지는 내용은 대개 같은 주제입니다.
+- 기존 주제 중 맞는 것이 없을 때만 topic_id를 "new"로 하고 new_title, new_category, new_description을 채우세요.
+  주제는 사안 단위로 만드세요. 너무 넓게 묶지도, 발언 하나마다 쪼개지도 마세요. 제목은 15자 안팎입니다.
+- 범주(new_category)는 ${categories.map((c) => `"${c}"`).join(', ')} 중 하나입니다.${
+  categories.length > 1
+    ? `
+  "${categories[0]}"에 대한 설명·논의·질문이면 "${categories[0]}", 그 밖의 사안은 "${categories.at(-1)}"입니다.${
+    focusNote
+      ? `
+  다음 범위도 "${categories[0]}"입니다: ${focusNote}`
+      : ''
+  }`
+    : ''
+}
+- 시작·인사·휴식 안내 같은 진행 발언은 "회의 진행" 주제 하나로 모으세요.
+- notes에는 이번 구간에서 그 주제에 해당하는 내용을 "- "로 시작하는 불릿으로 적으세요. 누가 무엇을 설명하고 묻고 답했는지, 수치, 결정, 할 일을 살리세요.
+- new_description은 30자 안팎 명사구로 쓰세요.
+- speakers: 이 항목에서 발언한 사람을 자막의 [이름] 표시 그대로 적으세요. 표시가 없으면 빈 배열입니다. 직함을 덧붙이지 마세요.
+- organizations: 이 항목에서 다룬 조직·기관·팀을 자막에 나온 대로 짧게 적으세요. 없으면 빈 배열입니다.
+- <등장 화자>, <등장 조직>에 이미 있는 이름이면 그 표기를 그대로 쓰세요.
+${TERSE_NOTE}
+- 다룰 내용이 없으면 items를 빈 배열로 두세요.`;
+
+const generalRouteSchema = (categories) => ({
+  type: 'object',
+  properties: {
+    items: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          topic_id: { type: 'string', description: '기존 주제 id 또는 "new"' },
+          new_title: { type: 'string' },
+          new_category: { type: 'string', enum: categories },
+          new_description: { type: 'string', description: '주제가 다루는 사안 한 문장' },
+          notes: { type: 'string' },
+          speakers: { type: 'array', items: { type: 'string' }, description: '발언한 화자' },
+          organizations: { type: 'array', items: { type: 'string' }, description: '다룬 조직' },
+        },
+        required: ['topic_id', 'notes', 'speakers', 'organizations'],
+      },
+    },
+  },
+  required: ['items'],
+});
+
+const GENERAL_TAGS = ['설명', '논의', '질문', '답변', '결정', '할 일'];
+
+const GENERAL_TOPIC_SYSTEM = `당신은 회의·강의의 한 주제를 누적 정리하는 기록관입니다.
+입력은 그 주제의 <기존 요약>(처음이면 없음)과 그 뒤에 추가된 <새 기록>입니다.
+기존 요약에 새 기록을 통합해 갱신된 요약 전체를 다시 만드세요. 새 기록에서 바뀌지 않은 기존 내용은 유지하고, 같은 내용은 한 항목으로 합치세요.
+입력에 없는 사실은 지어내지 마세요.
+${TERSE_NOTE}
+
+- core: 이 주제에서 지금까지 다뤄진 핵심을 30자 안팎 명사구로.
+- bullets: 최대 6개. 비슷한 사항은 묶고, 덜 중요한 것은 빼세요. 개별 내용은 구간별 기록에 남아 있습니다.
+  - tag: ${GENERAL_TAGS.join(', ')} 중 하나.
+  - speaker: 그 불릿 내용을 말한 화자(기록에 있을 때만, 없으면 빈 문자열). 직함을 덧붙이지 마세요.
+  - organization: 그 불릿이 다룬 조직(없으면 빈 문자열).
+  - text: 내용. 화자·조직 이름은 speaker·organization에 적었으면 text에서 반복하지 마세요.`;
+
+const generalTopicSchema = {
+  type: 'object',
+  properties: {
+    core: { type: 'string' },
+    bullets: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          tag: { type: 'string', enum: GENERAL_TAGS },
+          speaker: { type: 'string' },
+          organization: { type: 'string' },
+          text: { type: 'string' },
+        },
+        required: ['tag', 'speaker', 'organization', 'text'],
+      },
+    },
+  },
+  required: ['core', 'bullets'],
+};
+
 /** Plain-text form of a structured topic summary, for prompts and the .md export. */
 export function summaryToText(summary) {
   if (!summary) return '';
-  const who = (b) => [b.member && `${b.member} 위원`, b.institution].filter(Boolean).join(' · ');
+  const who = (b) =>
+    [b.member && `${b.member} 위원`, b.speaker, b.institution, b.organization]
+      .filter(Boolean)
+      .join(' · ');
   return [
     `**핵심**: ${summary.core}`,
     ...summary.bullets.map((b) => `- [${b.tag}]${who(b) ? ` (${who(b)})` : ''} ${b.text}`),
   ].join('\n');
-}
-
-// Small models occasionally add headings or <br> despite the prompt; the UI renders neither.
-export function clean(text) {
-  return text
-    .split('\n')
-    .filter((l) => !/^\s*#{1,6}\s/.test(l) && !/^\s*<br\s*\/?>\s*$/i.test(l) && !/^\s*```/.test(l))
-    .join('\n')
-    .trim();
-}
-
-// In-flight `claude -p` calls, so the UI can show what is being summarized right now.
-const jobs = new Map();
-let nextJobId = 0;
-let onJobsChange = () => {};
-export const runningJobs = () => [...jobs.values()];
-export function watchJobs(fn) {
-  onJobsChange = fn;
-}
-
-function track(job, promise) {
-  const id = nextJobId++;
-  jobs.set(id, { job, since: Date.now() });
-  onJobsChange();
-  return promise.finally(() => {
-    jobs.delete(id);
-    onJobsChange();
-  });
-}
-
-// Tools are disabled because the subtitle text is untrusted input; fact checks get
-// read-only web tools only (nothing local to read, run or leak).
-function runClaude(
-  system,
-  prompt,
-  { schema, job = '요약', model = MODEL, tools = [], timeoutMs = TIMEOUT_MS } = {},
-) {
-  return track(job, spawnClaude(system, prompt, schema, model, tools, timeoutMs));
-}
-
-const modelChildren = new Set();
-export function stopModelChildren() {
-  for (const child of modelChildren) child.kill('SIGKILL');
-}
-
-function spawnClaude(system, prompt, schema, model, tools, timeoutMs) {
-  // isolate from the dev setup: no MCP servers, no user/project settings (so no installed plugins,
-  // skills, hooks or CLAUDE.md), and no built-in skills either; ~2s less startup per call
-  const args = [
-    '-p',
-    '--model',
-    model,
-    '--tools',
-    tools.join(','),
-    '--no-session-persistence',
-    '--strict-mcp-config',
-    '--setting-sources',
-    '',
-    '--disable-slash-commands',
-    '--system-prompt',
-    system,
-  ];
-  if (tools.length) args.push('--allowedTools', tools.join(','));
-  if (schema) args.push('--output-format', 'json', '--json-schema', JSON.stringify(schema));
-  return new Promise((resolve, reject) => {
-    const child = spawn('claude', args, { stdio: ['pipe', 'pipe', 'pipe'] });
-    modelChildren.add(child);
-    let out = '';
-    let err = '';
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill('SIGKILL');
-    }, timeoutMs);
-    child.stdout.on('data', (d) => (out += d));
-    child.stderr.on('data', (d) => (err += d));
-    child.on('error', (e) => {
-      modelChildren.delete(child);
-      clearTimeout(timer);
-      reject(e);
-    });
-    child.on('close', (code) => {
-      modelChildren.delete(child);
-      clearTimeout(timer);
-      if (timedOut) return reject(new Error(`claude timed out after ${timeoutMs / 1000}s`));
-      if (code !== 0) return reject(new Error(`claude exited ${code}: ${err || out}`));
-      if (!schema) return resolve(clean(out));
-      try {
-        const envelope = JSON.parse(out);
-        if (envelope.is_error || !envelope.structured_output)
-          throw new Error(envelope.result || 'no structured output');
-        resolve(envelope.structured_output);
-      } catch (e) {
-        reject(new Error(`bad structured output: ${e.message}`));
-      }
-    });
-    child.stdin.end(prompt);
-  });
 }
 
 // Drop any preamble the model writes before the required "**핵심**" line.
@@ -256,19 +268,24 @@ export function fromSummaryStart(text) {
   return i > 0 ? text.slice(i) : text;
 }
 
-const header = (meeting) => `회의: ${meeting.committee} — ${meeting.subject} (${meeting.date})`;
-const subtitles = (lines) => `<자막>\n${lines.map((l) => l.text).join('\n')}\n</자막>`;
+const general = (meeting) => meeting.profile === 'general';
+const header = (meeting) =>
+  general(meeting)
+    ? `자료: ${meeting.title}`
+    : `회의: ${meeting.committee} — ${meeting.subject} (${meeting.date})`;
+const caption = (l) => (l.speaker ? `[${l.speaker}] ${l.text}` : l.text);
+const subtitles = (lines) => `<자막>\n${lines.map(caption).join('\n')}\n</자막>`;
 
 /** before: the last subtitles of the previous window, context only. */
 export async function summarizeWindow({ meeting, label, lines, previous, before = [] }) {
   return fromSummaryStart(
     await runClaude(
-      WINDOW_SYSTEM,
+      general(meeting) ? GENERAL_WINDOW_SYSTEM : WINDOW_SYSTEM,
       [
         header(meeting),
         previous && `직전 구간 요약(맥락 참고용):\n${previous}`,
-        before.length && `<직전 자막>\n${before.map((l) => l.text).join('\n')}\n</직전 자막>`,
-        `요약할 구간: ${label}`,
+        before.length && `<직전 자막>\n${before.map(caption).join('\n')}\n</직전 자막>`,
+        `요약할 구간${general(meeting) ? '(시작부터 경과 시간)' : ''}: ${label}`,
         subtitles(lines),
       ]
         .filter(Boolean)
@@ -281,6 +298,7 @@ export async function summarizeWindow({ meeting, label, lines, previous, before 
 /**
  * Split a window into topic items and assign each to an existing topic or a new one.
  * catalog: [{ id, category, title, description }]; previousItems: [{ id, title, notes }]
+ * Items carry members/institutions for Assembly and speakers/organizations for general sessions.
  */
 export async function routeWindow({
   meeting,
@@ -291,8 +309,8 @@ export async function routeWindow({
   previousItems,
   hint,
   focusNote,
-  knownMembers = [],
-  knownInstitutions = [],
+  knownPeople = [],
+  knownOrganizations = [],
 }) {
   const catalogText = catalog.length
     ? catalog
@@ -305,13 +323,16 @@ export async function routeWindow({
   const prevText = previousItems?.length
     ? previousItems.map((i) => `- ${i.id} ${i.title}\n${i.notes}`).join('\n')
     : null;
+  const [people, organizations] = general(meeting) ? ['화자', '조직'] : ['위원', '기관'];
   const out = await runClaude(
-    routeSystem(categories, focusNote),
+    general(meeting)
+      ? generalRouteSystem(categories, focusNote)
+      : routeSystem(categories, focusNote),
     [
       header(meeting),
       `<기존 주제>\n${catalogText}\n</기존 주제>`,
-      `<등장 위원>\n${knownMembers.join(', ') || '(아직 없음)'}\n</등장 위원>`,
-      `<등장 기관>\n${knownInstitutions.join(', ') || '(아직 없음)'}\n</등장 기관>`,
+      `<등장 ${people}>\n${knownPeople.join(', ') || '(아직 없음)'}\n</등장 ${people}>`,
+      `<등장 ${organizations}>\n${knownOrganizations.join(', ') || '(아직 없음)'}\n</등장 ${organizations}>`,
       prevText && `<직전 구간 분류>\n${prevText}\n</직전 구간 분류>`,
       hint,
       `구간: ${label}`,
@@ -319,15 +340,27 @@ export async function routeWindow({
     ]
       .filter(Boolean)
       .join('\n\n'),
-    { schema: routeSchema(categories), job: `${label} 주제 분류` },
+    {
+      schema: general(meeting) ? generalRouteSchema(categories) : routeSchema(categories),
+      job: `${label} 주제 분류`,
+    },
   );
   return out.items
-    .map((i) => ({
-      ...i,
-      notes: clean(i.notes ?? ''),
-      members: uniq((i.members ?? []).map(memberName)),
-      institutions: uniq(i.institutions ?? []),
-    }))
+    .map((i) =>
+      general(meeting)
+        ? {
+            ...i,
+            notes: clean(i.notes ?? ''),
+            speakers: uniq(i.speakers ?? []),
+            organizations: uniq(i.organizations ?? []),
+          }
+        : {
+            ...i,
+            notes: clean(i.notes ?? ''),
+            members: uniq((i.members ?? []).map(memberName)),
+            institutions: uniq(i.institutions ?? []),
+          },
+    )
     .filter((i) => i.notes);
 }
 
@@ -336,12 +369,14 @@ export async function summarizeTopic({ meeting, topic, previous, entries }) {
   const who = (e) =>
     [
       e.members?.length && `위원: ${e.members.join(', ')}`,
+      e.speakers?.length && `화자: ${e.speakers.join(', ')}`,
       e.institutions?.length && `기관: ${e.institutions.join(', ')}`,
+      e.organizations?.length && `조직: ${e.organizations.join(', ')}`,
     ]
       .filter(Boolean)
       .join(' / ');
   const out = await runClaude(
-    TOPIC_SYSTEM,
+    general(meeting) ? GENERAL_TOPIC_SYSTEM : TOPIC_SYSTEM,
     [
       header(meeting),
       `주제: ${topic.title} (${topic.category})${topic.description ? ` — ${topic.description}` : ''}`,
@@ -350,17 +385,29 @@ export async function summarizeTopic({ meeting, topic, previous, entries }) {
     ]
       .filter(Boolean)
       .join('\n\n'),
-    { schema: topicSchema, job: `주제 '${topic.title}' 정리` },
+    {
+      schema: general(meeting) ? generalTopicSchema : topicSchema,
+      job: `주제 '${topic.title}' 정리`,
+    },
   );
   return {
     core: out.core.trim(),
     bullets: out.bullets
-      .map((b) => ({
-        tag: b.tag,
-        member: memberName(b.member ?? ''),
-        institution: (b.institution ?? '').trim(),
-        text: b.text.trim(),
-      }))
+      .map((b) =>
+        general(meeting)
+          ? {
+              tag: b.tag,
+              speaker: (b.speaker ?? '').trim(),
+              organization: (b.organization ?? '').trim(),
+              text: b.text.trim(),
+            }
+          : {
+              tag: b.tag,
+              member: memberName(b.member ?? ''),
+              institution: (b.institution ?? '').trim(),
+              text: b.text.trim(),
+            },
+      )
       .filter((b) => b.text),
   };
 }

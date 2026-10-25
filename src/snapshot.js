@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import { alive } from './ownership.js';
+import { isElapsed, neutralTopic, profileOf } from './profile.js';
 import { rebuildPending, staleReasons } from './rebuild.js';
 import { files, readJson, readTranscript } from './store.js';
 import { loadTopics } from './topics.js';
@@ -11,7 +12,9 @@ export function snapshot(dir) {
   const saved = readJson(f.state);
   const state = saved ?? { windowMinutes: 5, windows: {} };
   const windowMs = state.windowMinutes * 60_000;
-  const current = windowStart(Date.now(), windowMs);
+  // an uploaded file has no live window: its times are elapsed, not wall-clock
+  const complete = meeting.complete === true;
+  const current = complete ? 0 : windowStart(Date.now(), windowMs);
   const windows = Object.values(state.windows);
   const routed = windows.filter((w) => w.routed).map((w) => w.end);
   const transcript = readTranscript(f.transcript);
@@ -21,6 +24,10 @@ export function snapshot(dir) {
   } catch {}
   return {
     lastLineAt,
+    profile: profileOf(meeting),
+    timeBasis: isElapsed(meeting) ? 'elapsed' : 'absolute',
+    complete,
+    duration: meeting.duration ?? null,
     meeting: {
       committee: meeting.committee ?? '',
       subject: meeting.subject ?? '수집 대기 중',
@@ -30,7 +37,8 @@ export function snapshot(dir) {
     categories: state.categories ?? [],
     // topics are current through the last window that went through routing
     topicsUntil: routed.length ? Math.max(...routed) : null,
-    topics: loadTopics(dir),
+    // legacy Assembly fields are adapted on read; files on disk are never rewritten
+    topics: loadTopics(dir).map(neutralTopic),
     running: state.running?.pid && alive(state.running.pid) ? state.running.jobs : [],
     windows: windows.sort((a, b) => b.start - a.start),
     // read-only check against the output's own settings; requested-setting changes are the
@@ -40,10 +48,12 @@ export function snapshot(dir) {
       required: staleReasons(dir, saved, state.settings, transcript),
       rebuiltFrom: state.rebuiltFrom ?? null,
     },
-    current: {
-      start: current,
-      end: current + windowMs,
-      lines: transcript.between(current, current + windowMs),
-    },
+    current: complete
+      ? { start: 0, end: 0, lines: [] }
+      : {
+          start: current,
+          end: current + windowMs,
+          lines: transcript.between(current, current + windowMs),
+        },
   };
 }

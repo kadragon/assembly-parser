@@ -53,7 +53,17 @@ corrected after summarization pause summaries as "다시 만들기 필요" while
 continues; nothing is overwritten until you choose "요약 다시 만들기", which moves the
 previous `state.json`, `topics/`, and `curation.jsonl` to `archive/<time>/` first.
 Legacy records without recorded settings remain viewable and are rebuilt on request.
-Uploads and category editing are not included yet.
+
+**Upload a meeting or lecture**: under "회의·강의 자막 파일 올리기", choose a JSONL
+transcript ([format](docs/jsonl-format.md), up to 5 MB), a title, and a new session ID.
+The whole file is validated before the session appears; errors list their line
+numbers and an existing session ID is never overwritten. Uploaded sessions use the
+general profile: times are elapsed from the start of the recording (hours keep
+counting past 24), speakers appear only when the file labels them, and no
+parliamentary titles are added. All windows, including the last partial one, are
+summarized once; there is no live collection to stop or resume. Fact checks and
+curation remain Assembly-only. SRT/WebVTT uploads and category editing are not
+included yet.
 
 Claude Code must be installed and authenticated for summarization. Although storage
 is local, transcript text is sent to Claude. Summary errors pause that session until an explicit retry and leave collection running;
@@ -110,6 +120,8 @@ npm run serve -- "$URL"            # http://localhost:3000 접속
 - `--curate`: 새 기록이 들어왔으면 30분마다 전체 주제 목록을 검토해 병합,
   기록 이동, 제목 변경, 범주 수정 제안을 `curation.jsonl`에 남깁니다.
   제안만 기록하고 주제는 바꾸지 않습니다.
+- `--factcheck`와 `--curate`는 국회 세션 전용입니다. 업로드한 회의·강의 세션에
+  쓰면 아무것도 쓰지 않고 종료합니다.
 
 #### 모델
 

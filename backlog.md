@@ -86,7 +86,6 @@ No task authorizes publishing the repository, selecting a license, or deploying 
 
 ## 4-general-jsonl-sessions
 
-- [ ] [FEAT] Upload and summarize general meeting or lecture JSONL end to end.
   - Source: [Approved design](docs/design/transcript-generalization.md), Normalize
     inputs and make time explicit; Separate domain rules from shared processing;
     Keep model support narrow; delivery item 4.
@@ -116,7 +115,7 @@ No task authorizes publishing the repository, selecting a license, or deploying 
 
 ## 5-subtitle-file-uploads
 
-- [ ] [FEAT] Upload SRT and WebVTT into the general-session workflow. *(blocked by: 4-general-jsonl-sessions)*
+- [ ] [FEAT] Upload SRT and WebVTT into the general-session workflow.
   - Source: [Approved design](docs/design/transcript-generalization.md), Normalize
     inputs and make time explicit; delivery item 5.
   - Scope: SRT/WebVTT parsing and format feedback in the existing browser uploader.
@@ -135,7 +134,7 @@ No task authorizes publishing the repository, selecting a license, or deploying 
 
 ## 6-interest-category-editor
 
-- [ ] [FEAT] Configure multiple interest categories in the browser. *(blocked by: 4-general-jsonl-sessions)*
+- [ ] [FEAT] Configure multiple interest categories in the browser.
   - Source: [Approved design](docs/design/transcript-generalization.md), Persist
     effective configuration; delivery item 6.
   - Scope: Named ordered categories, descriptions, keyword chips, explicit fallback,

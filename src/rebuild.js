@@ -75,11 +75,11 @@ export function staleReasons(dir, state, settings, transcript) {
   const reasons = [];
   if (state.version !== STATE_VERSION)
     reasons.push(`state version changed: ${state.version} → ${STATE_VERSION}`);
+  // output saved before profiles existed is Assembly output
+  const saved = { profile: 'assembly', ...state.settings };
   for (const reason of Object.keys(settings)
-    .filter((k) => JSON.stringify(state.settings[k]) !== JSON.stringify(settings[k]))
-    .map(
-      (k) => `${k} changed: ${JSON.stringify(state.settings[k])} → ${JSON.stringify(settings[k])}`,
-    ))
+    .filter((k) => JSON.stringify(saved[k]) !== JSON.stringify(settings[k]))
+    .map((k) => `${k} changed: ${JSON.stringify(saved[k])} → ${JSON.stringify(settings[k])}`))
     reasons.push(reason);
   // one pass over the transcript: the snapshot API runs this every second
   const windowMs = state.settings.windowMinutes * 60_000;
