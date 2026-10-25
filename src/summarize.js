@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
+import { categoryRules } from './categories.js';
 import { workerLock } from './ownership.js';
 import { formatElapsed, isElapsed, profileOf } from './profile.js';
 import {
@@ -57,6 +58,8 @@ const { values, positionals } = parseArgs({
     focus: { type: 'string' }, // e.g. 한국교원대학교 — becomes the first topic category
     'focus-keywords': { type: 'string' }, // comma-separated, e.g. 교원대 — hints the router
     'focus-note': { type: 'string' }, // projects of the focus institution, e.g. 부설 장애인 체육 특수학교 설립
+    // JSON list of { name, description, keywords, fallback }; replaces the focus shorthand
+    categories: { type: 'string' },
     rebuild: { type: 'boolean', default: false }, // archive all derived output, then summarize from scratch
     finalize: { type: 'boolean', default: false },
     once: { type: 'boolean', default: false }, // process closed windows, then exit
@@ -66,7 +69,7 @@ const { values, positionals } = parseArgs({
 });
 if (!positionals[0]) {
   console.error(
-    'usage: node src/summarize.js <player.asp URL | xcgcd> [--window 5] [--focus 기관명 --focus-keywords k1,k2 --focus-note 소관사업] [--rebuild] [--once] [--factcheck] [--curate] [--data data]',
+    'usage: node src/summarize.js <player.asp URL | xcgcd> [--window 5] [--focus 기관명 --focus-keywords k1,k2 --focus-note 소관사업 | --categories JSON] [--rebuild] [--once] [--factcheck] [--curate] [--data data]',
   );
   process.exit(1);
 }
@@ -122,7 +125,8 @@ const MAX_ATTEMPTS = 3;
 // topic curation looks at the whole meeting, so it runs rarely
 const CURATE_EVERY_MS = 30 * 60_000;
 const focusNote = savedNote || null;
-const categories = focus ? [focus, '그외'] : ['전체'];
+// the router's categories in order; anything it files elsewhere goes to the fallback
+const { names: categories, fallback, rules } = categoryRules(settings);
 
 // Output is never silently reused or replaced: a mismatch exits until --rebuild is requested.
 class StaleError extends Error {}
@@ -208,7 +212,7 @@ function applyRouting(w, items) {
       );
       topic ??= {
         id: nextTopicId([...topics.values()]),
-        category: categories.includes(item.new_category) ? item.new_category : categories.at(-1),
+        category: categories.includes(item.new_category) ? item.new_category : fallback,
         title: item.new_title,
         description: item.new_description ?? '',
         created: w.start,
@@ -289,8 +293,16 @@ async function processWindow(transcript, start) {
         notes: t.entries.find((e) => e.start === prev.start)?.notes ?? '',
       };
     });
-    const hint =
-      focus && mentions(lines, focusKeywords)
+    // keywords only hint at a category; the router still decides from the content
+    const hint = rules
+      ? rules
+          .filter((c) => c.keywords.length && mentions(lines, c.keywords))
+          .map(
+            (c) =>
+              `참고: 이번 구간 자막에 "${c.name}" 키워드(${c.keywords.join(', ')}) 언급이 있습니다.`,
+          )
+          .join('\n') || null
+      : focus && mentions(lines, focusKeywords)
         ? `참고: 이번 구간 자막에 ${focus}(${focusKeywords.join(', ')}) 언급이 있습니다.`
         : null;
     const catalog = [...topics.values()].map(({ id, category, title, description }) => ({
@@ -303,6 +315,7 @@ async function processWindow(transcript, start) {
       routeWindow({
         meeting,
         categories,
+        rules,
         catalog,
         label: label(start),
         lines,
@@ -386,7 +399,7 @@ async function curate({ force = false } = {}) {
   const last = state.curation;
   if (!force && last && (until <= last.until || Date.now() - last.at < CURATE_EVERY_MS)) return;
   console.log(`curating ${live.length} topics (proposal only)`);
-  const raw = await curateTopics({ meeting, categories, focusNote, topics: live });
+  const raw = await curateTopics({ meeting, categories, rules, focusNote, topics: live });
   const ops = validateCuration(raw, live, categories);
   const rejected = raw.filter((o) => !ops.includes(o));
   fs.appendFileSync(

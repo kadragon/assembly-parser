@@ -28,6 +28,273 @@ function el(tag, text, className) {
   if (className) node.className = className;
   return node;
 }
+function button(text, onClick, label) {
+  const node = el('button', text);
+  node.type = 'button';
+  if (label) node.setAttribute('aria-label', label);
+  node.addEventListener('click', onClick);
+  return node;
+}
+// A legacy focus is shown as its original two categories: the focus and "그외".
+const fromConfig = (config) =>
+  config?.categories
+    ? structuredClone(config.categories)
+    : config?.focus
+      ? [
+          {
+            name: config.focus,
+            description: config.focusNote ?? '',
+            keywords: (config.focusKeywords ?? '')
+              .split(',')
+              .map((k) => k.trim())
+              .filter(Boolean),
+            fallback: false,
+          },
+          { name: '그외', description: '', keywords: [], fallback: true },
+        ]
+      : [];
+const categoryNames = (config) =>
+  fromConfig(config)
+    .map((c) => (c.fallback ? `${c.name}(나머지)` : c.name))
+    .join(' · ');
+let saved = [];
+let editorCount = 0;
+/**
+ * Ordered interest categories with keyword chips and one fallback. No categories means one
+ * overall summary. An unchanged legacy focus is sent back as the focus shorthand, so opening and
+ * saving it never makes its summaries stale.
+ */
+function categoryEditor(mount) {
+  const uid = ++editorCount;
+  let categories = [];
+  let legacy = null;
+  const root = el('div', '', 'category-editor');
+  const heading = el('div', '', 'category-heading');
+  heading.append(el('span', '관심 범주', 'label'), el('span', '선택', 'meta'));
+  const reuse = el('select');
+  reuse.setAttribute('aria-label', '저장된 기록의 범주 불러오기');
+  reuse.addEventListener('change', () => {
+    const session = saved.find((s) => s.id === reuse.value);
+    if (session) load(session.config, false);
+    reuse.value = '';
+  });
+  const list = el('ol', '', 'category-list');
+  const empty = el(
+    'p',
+    '범주가 없으면 회의 전체를 한 범주로 요약합니다. 범주를 만들면 주제를 범주별로 나눠 정리합니다.',
+    'hint',
+  );
+  const add = button('+ 범주 추가', () => {
+    // the first category comes with a fallback, since exactly one is required
+    if (!categories.length)
+      categories.push(
+        { name: '', description: '', keywords: [], fallback: false },
+        { name: '그외', description: '', keywords: [], fallback: true },
+      );
+    else categories.splice(-1, 0, { name: '', description: '', keywords: [], fallback: false });
+    draw(categories.findIndex((c) => !c.name));
+  });
+  add.className = 'add-category';
+  root.append(heading, reuse, empty, list, add);
+  mount.append(root);
+
+  function draw(focusIndex, chipFocus = false) {
+    empty.hidden = categories.length > 0;
+    list.replaceChildren(
+      ...categories.map((category, i) => {
+        const item = el('li', '', 'category');
+        const id = `category-${uid}-${i}`;
+        const top = el('div', '', 'category-top');
+        const name = el('input');
+        name.id = `${id}-name`;
+        name.maxLength = 100;
+        name.required = true;
+        name.placeholder = '범주 이름 (예: 예산)';
+        name.value = category.name;
+        name.setAttribute('aria-label', `범주 ${i + 1} 이름`);
+        name.addEventListener('input', () => {
+          category.name = name.value;
+        });
+        const move = (to) => () => {
+          categories.splice(to, 0, ...categories.splice(i, 1));
+          draw(to);
+        };
+        const tools = el('div', '', 'category-tools');
+        const up = button('↑', move(i - 1), `${i + 1}번째 범주를 위로`);
+        const down = button('↓', move(i + 1), `${i + 1}번째 범주를 아래로`);
+        up.disabled = i === 0;
+        down.disabled = i === categories.length - 1;
+        const remove = button(
+          '삭제',
+          () => {
+            categories.splice(i, 1);
+            // keep exactly one fallback while any category remains
+            if (categories.length && !categories.some((c) => c.fallback))
+              categories.at(-1).fallback = true;
+            draw();
+          },
+          `${i + 1}번째 범주 삭제`,
+        );
+        tools.append(up, down, remove);
+        top.append(name, tools);
+        const description = el('textarea');
+        description.rows = 2;
+        description.maxLength = 2000;
+        description.placeholder = '이 범주에 넣을 내용 (예: 예산 편성·집행, 결산)';
+        description.value = category.description;
+        description.setAttribute('aria-label', `범주 ${i + 1} 설명`);
+        description.addEventListener('input', () => {
+          category.description = description.value;
+        });
+        const chips = el('div', '', 'chips');
+        for (const [k, keyword] of category.keywords.entries()) {
+          const chip = el('span', keyword, 'chip');
+          chip.append(
+            button(
+              '×',
+              () => {
+                category.keywords.splice(k, 1);
+                draw(i);
+              },
+              `키워드 ${keyword} 삭제`,
+            ),
+          );
+          chips.append(chip);
+        }
+        const keyword = el('input');
+        keyword.maxLength = 100;
+        keyword.placeholder = '키워드 입력 후 Enter';
+        keyword.setAttribute('aria-label', `범주 ${i + 1} 키워드 추가`);
+        const commit = () => {
+          const words = keyword.value
+            .split(',')
+            .map((w) => w.trim())
+            .filter((w) => w && !category.keywords.includes(w));
+          keyword.value = '';
+          if (!words.length) return false;
+          category.keywords.push(...words);
+          return true;
+        };
+        keyword.addEventListener('keydown', (event) => {
+          if (event.isComposing) return;
+          if (event.key === 'Enter' || event.key === ',') {
+            event.preventDefault();
+            if (commit()) draw(i, true);
+          } else if (event.key === 'Backspace' && !keyword.value && category.keywords.length) {
+            category.keywords.pop();
+            draw(i, true);
+          }
+        });
+        // a word typed but not yet confirmed still counts
+        keyword.addEventListener('blur', () => {
+          if (commit()) draw();
+        });
+        chips.append(keyword);
+        const fallback = el('label', '', 'fallback');
+        const radio = el('input');
+        radio.type = 'radio';
+        radio.name = `fallback-${uid}`;
+        radio.checked = category.fallback;
+        radio.addEventListener('change', () => {
+          for (const c of categories) c.fallback = c === category;
+        });
+        fallback.append(
+          radio,
+          document.createTextNode(' 나머지 범주 (다른 범주에 맞지 않는 내용)'),
+        );
+        item.append(top, description, chips, fallback);
+        return item;
+      }),
+    );
+    if (focusIndex !== undefined)
+      list.children[focusIndex]?.querySelector(chipFocus ? '.chips input' : 'input')?.focus();
+  }
+  function load(config, keepLegacy = true) {
+    categories = fromConfig(config);
+    legacy = keepLegacy && config?.focus && !config.categories ? config : null;
+    draw();
+  }
+  function config() {
+    const clean = categories.map((c) => ({
+      name: c.name.trim(),
+      description: c.description.trim(),
+      keywords: c.keywords,
+      fallback: c.fallback,
+    }));
+    if (legacy && JSON.stringify(clean) === JSON.stringify(fromConfig(legacy)))
+      return {
+        focus: legacy.focus,
+        focusKeywords: legacy.focusKeywords ?? '',
+        focusNote: legacy.focusNote ?? '',
+      };
+    return clean.length ? { categories: clean } : {};
+  }
+  function options() {
+    const choices = saved.filter((s) => s.config?.categories || s.config?.focus);
+    reuse.hidden = !choices.length;
+    if (document.activeElement === reuse) return;
+    reuse.replaceChildren(
+      el('option', '저장된 기록의 범주 불러오기…'),
+      ...choices.map((s) => {
+        const option = el('option', `${s.meeting.subject} — ${categoryNames(s.config)}`);
+        option.value = s.id;
+        return option;
+      }),
+    );
+    reuse.firstChild.value = '';
+  }
+  draw();
+  return { load, config, options, reset: () => load(null) };
+}
+const editors = [];
+// Open settings panels survive the periodic re-render with whatever the user has typed.
+const panels = new Map();
+function settingsPanel(session) {
+  const panel = el('div', '', 'settings-panel');
+  const id = `window-${session.id}`;
+  const label = el('label', '요약 간격');
+  label.htmlFor = id;
+  const select = el('select');
+  select.id = id;
+  for (const minutes of [5, 10, 15, 30, 60]) {
+    const option = el('option', `${minutes}분`);
+    option.value = String(minutes);
+    select.append(option);
+  }
+  select.value = String(session.config?.windowMinutes ?? 5);
+  panel.append(label, select);
+  const editor = categoryEditor(panel);
+  editor.load(session.config);
+  editor.options();
+  const close = () => {
+    panels.delete(session.id);
+    lastRender = '';
+  };
+  const save = button('설정 저장', () =>
+    perform(save, async () => {
+      await post(`/api/sessions/${encodeURIComponent(session.id)}/config`, {
+        config: { windowMinutes: Number(select.value), ...editor.config() },
+      });
+      close();
+    }),
+  );
+  save.className = 'save';
+  const cancel = button('취소', () => {
+    close();
+    render(saved);
+  });
+  const row = el('div', '', 'actions');
+  row.append(save, cancel);
+  panel.append(
+    el(
+      'p',
+      '범주나 요약 간격을 바꾸면 기존 요약은 그대로 두고 요약을 멈춥니다. "요약 다시 만들기"를 누르면 이전 결과를 보관함에 옮기고 새 설정으로 다시 요약합니다.',
+      'hint',
+    ),
+    row,
+  );
+  return panel;
+}
 async function post(url, body) {
   const res = await fetch(url, {
     method: 'POST',
@@ -87,7 +354,7 @@ function render(sessions) {
       card.append(
         el(
           'p',
-          `${session.config.windowMinutes}분 간격 · ${session.config.focus || '전체 요약'}`,
+          `${session.config.windowMinutes}분 간격 · ${categoryNames(session.config) || '전체 요약'}`,
           'meta',
         ),
       );
@@ -117,7 +384,7 @@ function render(sessions) {
       card.append(
         el(
           'p',
-          `저장된 요약이 현재 자막이나 설정과 맞지 않아 요약을 멈췄습니다. 수집은 계속됩니다. 다시 만들면 이전 요약과 주제 기록은 보관함으로 옮겨집니다.\n${session.staleReasons ?? ''}`,
+          `저장된 요약이 현재 자막이나 설정과 맞지 않아 요약을 멈췄습니다.${uploaded(session) ? '' : ' 수집은 계속됩니다.'} 다시 만들면 이전 요약과 주제 기록은 보관함으로 옮겨집니다.\n${session.staleReasons ?? ''}`,
           'notice',
         ),
       );
@@ -161,16 +428,24 @@ function render(sessions) {
       ...(rebuildable ? [['rebuild', '요약 다시 만들기']] : []),
     ]) {
       if (!session.config && !['stop', 'rebuild'].includes(action)) continue;
-      const button = el('button', title);
-      button.type = 'button';
-      button.addEventListener('click', () =>
-        perform(button, () =>
+      const control = button(title, () =>
+        perform(control, () =>
           post(`/api/sessions/${encodeURIComponent(session.id)}/${action}`, {}),
         ),
       );
-      actions.append(button);
+      actions.append(control);
     }
+    if (!panels.has(session.id))
+      actions.append(
+        button('설정 편집', () => {
+          panels.set(session.id, settingsPanel(session));
+          lastRender = '';
+          render(saved);
+          panels.get(session.id).querySelector('select').focus();
+        }),
+      );
     card.append(actions);
+    if (panels.has(session.id)) card.append(panels.get(session.id));
     container.append(card);
   }
 }
@@ -179,6 +454,8 @@ async function refresh() {
   if (!res.ok) throw new Error('서버 연결을 확인해 주세요.');
   const data = await res.json();
   token = data.token;
+  saved = data.sessions;
+  for (const editor of editors) editor.options();
   render(data.sessions);
   const warnings = document.querySelector('#warnings');
   warnings.replaceChildren(
@@ -212,7 +489,7 @@ function renderCatalog() {
         urlInput.value = item.url;
         message.textContent = `${item.committee} 회의를 선택했습니다. 관심 주제를 정한 뒤 시작하세요.`;
         renderCatalog();
-        document.querySelector('#focus').focus();
+        document.querySelector('#start-categories button.add-category').focus();
       });
       row.append(choose);
     } else if (item.live) row.append(el('span', '회의 정보가 없어 선택할 수 없음', 'meta'));
@@ -247,11 +524,13 @@ urlInput.addEventListener('input', () => renderCatalog());
 loadCatalog();
 form.addEventListener('submit', (event) => {
   event.preventDefault();
-  const fields = Object.fromEntries(new FormData(form));
-  const { url, ...config } = fields;
-  config.windowMinutes = Number(config.windowMinutes);
-  perform(form.querySelector('button'), () => post('/api/start', { url, config }));
+  const { url, windowMinutes } = Object.fromEntries(new FormData(form));
+  const config = { windowMinutes: Number(windowMinutes), ...startEditor.config() };
+  perform(form.querySelector('button[type=submit]'), () => post('/api/start', { url, config }));
 });
+const startEditor = categoryEditor(document.querySelector('#start-categories'));
+const uploadEditor = categoryEditor(document.querySelector('#upload-categories'));
+editors.push(startEditor, uploadEditor);
 const uploadForm = document.querySelector('#upload-form');
 const fileInput = document.querySelector('#file');
 // The file name only suggests a title and ID; the server never uses it as a path.
@@ -273,7 +552,7 @@ uploadForm.addEventListener('submit', (event) => {
   event.preventDefault();
   const file = fileInput.files[0];
   const fields = Object.fromEntries(new FormData(uploadForm));
-  perform(uploadForm.querySelector('button'), async () => {
+  perform(uploadForm.querySelector('button[type=submit]'), async () => {
     // the extension only picks the parser; the server validates the content itself
     const format = /\.(srt|vtt|jsonl)$/i.exec(file.name)?.[1].toLowerCase();
     if (!format) throw new Error('.srt, .vtt, .jsonl 파일만 올릴 수 있습니다.');
@@ -288,11 +567,12 @@ uploadForm.addEventListener('submit', (event) => {
     await post('/api/upload', {
       id: fields.id,
       title: fields.title,
-      config: { windowMinutes: Number(fields.windowMinutes) },
+      config: { windowMinutes: Number(fields.windowMinutes), ...uploadEditor.config() },
       format,
       content,
     });
     uploadForm.reset();
+    uploadEditor.reset();
   });
 });
 refresh().catch((error) => {

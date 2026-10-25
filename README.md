@@ -26,11 +26,22 @@ npm start
 
 Choose a meeting from the live broadcast list (fetched from the Assembly main-page
 feed, cached briefly; **Refresh** rechecks it) or paste an official Assembly player
-URL, enter optional focus settings, and start collection and summarization
+URL, define optional interest categories, and start collection and summarization
 together. Direct URL entry works even when the list cannot be loaded. Only
 currently live broadcasts with AI captions can start; this is rechecked at Start. The application binds to loopback; use the exact printed
 address because write requests require matching Host, Origin, and a session token.
 A busy port fails before any worker starts.
+
+Interest categories are optional; without them each window and topic is summarized
+as one overall category. Each category has a name, an optional description, and
+keyword chips (type a word, then Enter). Order sets the viewer's grouping; exactly
+one category is the fallback for anything that fits no other. Keywords only hint
+the router when they appear in a window; the description decides. **Load saved
+categories** copies another session's categories, and upload uses the same editor.
+**Edit settings** on a saved session changes its categories or window length
+without touching existing output: a summary-affecting change pauses summaries as
+stale until **Rebuild summary** archives the old output and summarizes again.
+A legacy focus setting appears as its two categories and is kept as-is unless edited.
 
 The home page lists saved sessions with separate collection and summary status.
 Closing a tab or navigating between sessions does not stop workers. **Stop** stops
@@ -110,6 +121,12 @@ npm run serve -- "$URL"            # http://localhost:3000 접속
   자막에 키워드가 나오면 라우터에 힌트로 전달됩니다(공백 무시, 기본값은 기관명).
   `--focus-note`에는 기관명이 자막에 안 나와도 그 기관 소관으로 분류할 사업을
   적습니다(예: `"부설 장애인 체육 중·고등 특수학교(2028년 3월 개교 예정) 설립"`).
+- `--categories '<JSON>'`: 여러 범주를 순서대로 지정합니다. 각 항목은
+  `{"name", "description", "keywords": [...], "fallback"}`이며 이름은 겹치지 않아야
+  하고 `fallback: true`인 나머지 범주가 정확히 하나 있어야 합니다. 키워드는 라우터
+  힌트일 뿐이며 분류는 설명을 보고 정합니다. `[]`는 범주 없음입니다.
+  `--focus` 계열과 함께 쓰면 거부합니다. 생략하면 저장된 범주를 쓰고, `--focus`를
+  지정하면 저장된 범주 대신 `<기관명>` / `그외`를 씁니다.
 - `--rebuild`: 저장된 자막으로 처음부터 다시 요약합니다. 기존 `state.json`,
   `topics/`, `curation.jsonl`을 먼저 `archive/<시각>/`에 함께 보관하며,
   `transcript.jsonl`은 그대로 둡니다. 프롬프트나 출력 형식을 바꿨다면

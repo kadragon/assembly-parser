@@ -79,6 +79,10 @@ export async function startApp({
         if (url.pathname === '/api/start')
           result = await sessions.serial(() => sessions.start(body));
         else if (upload) result = await sessions.serial(() => sessions.upload(body));
+        else if (/^\/api\/sessions\/[A-Za-z0-9_-]{1,100}\/config$/.test(url.pathname))
+          result = await sessions.serial(() =>
+            sessions.configure(url.pathname.split('/')[3], body),
+          );
         else {
           const match =
             /^\/api\/sessions\/([A-Za-z0-9_-]{1,100})\/(stop|resume|retry|finalize|rebuild)$/.exec(
