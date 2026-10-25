@@ -57,9 +57,12 @@ export function effectiveSettings(saved, flags, identity) {
   };
 }
 
+// The STT server re-sends a final with speaker turns split onto "-" lines; only a change in
+// the words themselves counts as a correction.
+const words = (text) => text.replace(/^-/gm, '').replace(/\s+/g, '');
 export const fingerprint = (lines) =>
   createHash('sha256')
-    .update(JSON.stringify(lines.map((l) => [l.key, l.text])))
+    .update(JSON.stringify(lines.map((l) => [l.key, words(l.text)])))
     .digest('hex')
     .slice(0, 16);
 
@@ -69,11 +72,15 @@ const minute = (t) => new Date(t).toISOString().slice(11, 16);
 export function staleReasons(dir, state, settings, transcript) {
   if (!state) return fs.existsSync(topicsDir(dir)) ? ['topics exist without summary state'] : [];
   if (!state.settings) return ['existing output has no recorded settings (legacy format)'];
-  const reasons = Object.keys(settings)
+  const reasons = [];
+  if (state.version !== STATE_VERSION)
+    reasons.push(`state version changed: ${state.version} → ${STATE_VERSION}`);
+  for (const reason of Object.keys(settings)
     .filter((k) => JSON.stringify(state.settings[k]) !== JSON.stringify(settings[k]))
     .map(
       (k) => `${k} changed: ${JSON.stringify(state.settings[k])} → ${JSON.stringify(settings[k])}`,
-    );
+    ))
+    reasons.push(reason);
   // one pass over the transcript: the snapshot API runs this every second
   const windowMs = state.settings.windowMinutes * 60_000;
   const byWindow = new Map();
@@ -92,13 +99,16 @@ export function staleReasons(dir, state, settings, transcript) {
   return reasons;
 }
 
-/** Completes a rebuild that stopped after its archive was published. */
+/**
+ * Completes a rebuild that stopped after its archive was published.
+ * Returns { archive, settings } so the rebuild continues with the settings it was asked for.
+ */
 export function finishRebuild(dir) {
   const pending = readJson(marker(dir));
   if (!pending) return null;
   for (const name of DERIVED) fs.rmSync(path.join(dir, name), { recursive: true, force: true });
   fs.rmSync(marker(dir));
-  return pending.archive;
+  return pending;
 }
 
 /**
@@ -106,7 +116,7 @@ export function finishRebuild(dir) {
  * live is removed, so an interruption at any point leaves a complete copy somewhere.
  * Returns the archive path relative to the session, or null when there was nothing to keep.
  */
-export function archiveOutput(dir) {
+export function archiveOutput(dir, settings) {
   const present = DERIVED.filter((name) => fs.existsSync(path.join(dir, name)));
   if (!present.length) return null;
   const name = new Date().toISOString().replace(/[:.]/g, '-');
@@ -116,7 +126,7 @@ export function archiveOutput(dir) {
     fs.cpSync(path.join(dir, item), path.join(staging, item), { recursive: true });
   const archive = path.join('archive', name);
   fs.renameSync(staging, path.join(dir, archive));
-  writeJson(marker(dir), { archive });
+  writeJson(marker(dir), { archive, settings });
   finishRebuild(dir);
   return archive;
 }

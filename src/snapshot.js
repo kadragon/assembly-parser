@@ -8,7 +8,8 @@ import { windowStart } from './transcript.js';
 export function snapshot(dir) {
   const f = files(dir);
   const meeting = readJson(f.meeting, {});
-  const state = readJson(f.state, { windowMinutes: 5, windows: {} });
+  const saved = readJson(f.state);
+  const state = saved ?? { windowMinutes: 5, windows: {} };
   const windowMs = state.windowMinutes * 60_000;
   const current = windowStart(Date.now(), windowMs);
   const windows = Object.values(state.windows);
@@ -35,8 +36,8 @@ export function snapshot(dir) {
     // read-only check against the output's own settings; requested-setting changes are the
     // control server's to report
     rebuild: {
-      pending: rebuildPending(dir),
-      required: staleReasons(dir, readJson(f.state), state.settings, transcript),
+      pending: rebuildPending(dir) || Boolean(state.rebuilding),
+      required: staleReasons(dir, saved, state.settings, transcript),
       rebuiltFrom: state.rebuiltFrom ?? null,
     },
     current: {

@@ -226,7 +226,8 @@ export class Sessions {
         if (child.stopping) entry.state[field] = 'stopped';
         else if (role === 'summarizer' && code === STALE_EXIT) {
           entry.state.summary = 'stale';
-          entry.state.staleReasons = output.trim();
+          // the output tail also holds progress logs; keep only the reasons
+          entry.state.staleReasons = output.slice(output.lastIndexOf('rebuild required:')).trim();
         } else if (error || code !== 0) {
           entry.state[field] = 'error';
           entry.state[`${field}Error`] = error?.message ?? (output || `Worker exited ${code}`);
@@ -278,18 +279,15 @@ export class Sessions {
       entry.summaryRelease ??= acquireLock(entry.dir, 'summarizer');
       const c = entry.config;
       // Every setting is explicit, so values saved with older output never fill a gap.
+      // `--name=value` keeps a value that starts with "-" (a bulleted note) from parsing as a flag.
       const args = [
         entry.id,
         '--data',
         this.root,
-        '--window',
-        String(c.windowMinutes),
-        '--focus',
-        c.focus,
-        '--focus-keywords',
-        c.focusKeywords,
-        '--focus-note',
-        c.focusNote,
+        `--window=${c.windowMinutes}`,
+        `--focus=${c.focus}`,
+        `--focus-keywords=${c.focusKeywords}`,
+        `--focus-note=${c.focusNote}`,
         '--once',
       ];
       if (entry.finalizing) args.push('--finalize');
@@ -357,10 +355,17 @@ export class Sessions {
       if (entry.summarizer) throw new Error('A summary is running; rebuild after it finishes');
       const previous = readJson(files(entry.dir).state);
       if (!entry.config) {
-        // legacy sessions only imply their window size and focus
-        const legacy = savedSettings(previous);
+        // CLI-made output records its settings; legacy output only implies window and focus
+        const saved = savedSettings(previous);
         entry.config = validateConfig(
-          legacy ? { windowMinutes: legacy.windowMinutes, focus: legacy.focus } : {},
+          saved
+            ? {
+                windowMinutes: saved.windowMinutes,
+                focus: saved.focus,
+                focusKeywords: saved.focusKeywords.join(','),
+                focusNote: saved.focusNote,
+              }
+            : {},
         );
       }
       this.pending = this.pending.filter((e) => e !== entry);

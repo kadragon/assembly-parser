@@ -37,7 +37,7 @@ async function fixture(t, options = {}) {
   );
   fs.writeFileSync(
     summary,
-    `const fs=require('node:fs'); const path=require('node:path'); const root=process.argv[process.argv.indexOf('--data')+1]; fs.appendFileSync(path.join(root,'workers.jsonl'),JSON.stringify({role:'summary',pid:process.pid,id:process.argv[2],args:process.argv})+'\\n'); if(fs.existsSync(path.join(root,'fail'))) { console.error('synthetic model failure'); process.exit(2); } if(process.argv.includes('--rebuild')) fs.writeFileSync(path.join(root,process.argv[2],'state.json'),JSON.stringify({windows:{},rebuiltFrom:'archive/synthetic'})); else if(fs.existsSync(path.join(root,'stale'))) { console.error('rebuild required:\\n- focus changed'); process.exit(3); } setTimeout(()=>process.exit(0),200);`,
+    `const fs=require('node:fs'); const path=require('node:path'); const root=process.argv[process.argv.indexOf('--data')+1]; fs.appendFileSync(path.join(root,'workers.jsonl'),JSON.stringify({role:'summary',pid:process.pid,id:process.argv[2],args:process.argv})+'\\n'); if(fs.existsSync(path.join(root,'fail'))) { console.error('synthetic model failure'); process.exit(2); } if(process.argv.includes('--rebuild')) fs.writeFileSync(path.join(root,process.argv[2],'state.json'),JSON.stringify({windows:{},rebuiltFrom:'archive/synthetic'})); else if(fs.existsSync(path.join(root,'stale'))) { console.log('progress log'); console.error('rebuild required:\\n- focus changed'); process.exit(3); } setTimeout(()=>process.exit(0),200);`,
   );
   const app = await startApp({
     root,
@@ -122,7 +122,7 @@ test('concurrent Start is idempotent, literal settings persist, and summaries qu
   await until(() => app.workers().filter((w) => w.role === 'summary').length === 2);
   assert.equal(app.workers().filter((w) => w.role === 'collector' && w.id === 'one').length, 1);
   const first = app.workers().find((w) => w.role === 'summary');
-  assert.ok(first.args.includes(config.focus));
+  assert.ok(first.args.includes(`--focus=${config.focus}`));
   assert.equal(alive(first.pid), false);
   const html = await (await fetch(`${app.origin}/sessions/one/`)).text();
   assert.match(html, /세션 관리/);
@@ -483,14 +483,9 @@ test('changed settings pause summaries as stale while collecting; rebuild passes
   assert.equal(entry.state.collection, 'running');
   assert.match(entry.state.staleReasons, /focus changed/);
   const args = app.workers().at(-1).args;
-  assert.deepEqual(args.slice(args.indexOf('--focus'), args.indexOf('--focus') + 6), [
-    '--focus',
-    '다른 기관',
-    '--focus-keywords',
-    '',
-    '--focus-note',
-    '',
-  ]);
+  for (const arg of ['--focus=다른 기관', '--focus-keywords=', '--focus-note='])
+    assert.ok(args.includes(arg), arg);
+  assert.equal(entry.state.staleReasons, 'rebuild required:\n- focus changed');
   const sessions = (await (await fetch(`${app.origin}/api/sessions`)).json()).sessions;
   assert.equal(sessions[0].summary, 'stale');
   assert.equal((await app.post('/api/sessions/one/rebuild')).status, 200);
@@ -516,11 +511,7 @@ test('legacy sessions without saved settings rebuild with their recorded window 
   assert.equal((await app.post('/api/sessions/legacy/rebuild')).status, 200);
   await until(() => app.sessions.load('legacy').state.summary === 'complete');
   const args = app.workers().at(-1).args;
-  for (const [flag, value] of [
-    ['--window', '10'],
-    ['--focus', '기관'],
-  ])
-    assert.equal(args[args.indexOf(flag) + 1], value);
+  for (const arg of ['--window=10', '--focus=기관']) assert.ok(args.includes(arg), arg);
   assert.ok(args.includes('--rebuild') && args.includes('--finalize'));
   assert.equal(app.sessions.load('legacy').config.windowMinutes, 10);
 });

@@ -83,8 +83,8 @@ const release = workerLock(dir, 'summarizer');
 process.on('exit', release);
 // everything below runs as the session's only summary writer
 const resumed = finishRebuild(dir);
-if (resumed) console.log(`completed interrupted rebuild; previous output in ${resumed}`);
-const settings = effectiveSettings(savedSettings(readJson(f.state)), values, {
+if (resumed) console.log(`completed interrupted rebuild; previous output in ${resumed.archive}`);
+const settings = effectiveSettings(resumed?.settings ?? savedSettings(readJson(f.state)), values, {
   model: MODEL,
   promptVersion: PROMPT_VERSION,
 });
@@ -113,6 +113,7 @@ const categories = focus ? [focus, '그외'] : ['전체'];
 class StaleError extends Error {}
 function exitIfStale(reasons) {
   if (!reasons.length) return;
+  stopModelChildren();
   process.stderr.write(`rebuild required:\n${reasons.map((r) => `- ${r}`).join('\n')}\n`);
   process.exit(STALE_EXIT);
 }
@@ -126,17 +127,18 @@ const fresh = (rebuiltFrom) => ({
   settings,
   windowMinutes,
   categories,
-  ...(rebuiltFrom && { rebuiltFrom }),
+  // `rebuilding` lasts until the first complete pass, so viewers know output is refilling
+  ...(rebuiltFrom && { rebuiltFrom, rebuilding: true }),
   windows: {},
 });
 let state = readJson(f.state);
 if (values.rebuild) {
-  const archived = archiveOutput(dir);
+  const archived = archiveOutput(dir, settings);
   if (archived) console.log(`previous output archived to ${archived}`);
-  state = fresh(archived ?? resumed);
+  state = fresh(archived ?? resumed?.archive);
 } else {
   exitIfStale(staleReasons(dir, state, settings, readTranscript(f.transcript)));
-  state ??= fresh(resumed);
+  state ??= fresh(resumed?.archive);
 }
 const save = () => writeJson(f.state, state);
 // pid lets serve ignore a list left behind by a process that was killed mid-call
@@ -410,6 +412,10 @@ async function tick() {
     }
   }
   await updateTopics();
+  if (state.rebuilding) {
+    delete state.rebuilding;
+    save();
+  }
   // after the windows, so a review never delays a summary that is due; it never edits topics yet
   if (values.curate) await curate({ force: values.once });
 }

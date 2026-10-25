@@ -166,20 +166,28 @@ test('explicit rebuild archives state, topics and proposals together and reproce
 
 test('an interrupted rebuild resumes from its published archive without mixing old and new output', async (t) => {
   const f = setup(t);
-  await ok(f, []);
+  await ok(f, ['--window', '10', '--focus', '기관']);
   // simulate a crash after the archive was published and the old topics were removed
   const archived = path.join(f.dir, 'archive', 'interrupted');
   fs.mkdirSync(archived, { recursive: true });
   fs.copyFileSync(path.join(f.dir, 'state.json'), path.join(archived, 'state.json'));
   fs.cpSync(path.join(f.dir, 'topics'), path.join(archived, 'topics'), { recursive: true });
-  writeJson(path.join(f.dir, '.rebuild.json'), { archive: path.join('archive', 'interrupted') });
+  const { settings } = JSON.parse(f.read('state.json'));
+  writeJson(path.join(f.dir, '.rebuild.json'), {
+    archive: path.join('archive', 'interrupted'),
+    settings,
+  });
+  // the crash also removed the live state, so only the marker remembers the requested settings
   fs.rmSync(path.join(f.dir, 'topics'), { recursive: true });
-  const old = f.read('state.json');
+  fs.renameSync(path.join(f.dir, 'state.json'), path.join(f.root, 'old-state.json'));
+  const old = fs.readFileSync(path.join(f.root, 'old-state.json'), 'utf8');
   await ok(f, []);
   assert.equal(fs.existsSync(path.join(f.dir, '.rebuild.json')), false);
   const state = JSON.parse(f.read('state.json'));
   assert.notEqual(f.read('state.json'), old);
   assert.equal(state.rebuiltFrom, path.join('archive', 'interrupted'));
+  assert.deepEqual(state.settings, settings);
+  assert.equal(state.rebuilding, undefined, 'a completed pass clears the rebuilding flag');
   assert.deepEqual(
     fs.readdirSync(path.join(f.dir, 'topics')).filter((n) => n.endsWith('.json')),
     ['t001.json'],
@@ -228,4 +236,21 @@ test('legacy output without recorded settings stays viewable and unmodified unti
   const state = JSON.parse(f.read('state.json'));
   assert.equal(state.settings.focus, '기관', 'rebuild derives omitted settings from legacy output');
   assert.deepEqual(snapshot(f.dir).rebuild.required, []);
+});
+
+test('speaker-split finals and bulleted notes do not break unchanged output', async (t) => {
+  const f = setup(t);
+  await ok(f, ['--focus=기관', '--focus-note=- 부설 학교\n- 기숙사']);
+  // the STT server re-sends a final with turns split onto "-" lines; the words are unchanged
+  f.caption('b', T0 + 6 * 60_000, '둘째\n- 발언');
+  await ok(f, []);
+  assert.equal(JSON.parse(f.read('state.json')).settings.focusNote, '- 부설 학교\n- 기숙사');
+});
+
+test('output written by another state version requires a rebuild', async (t) => {
+  const f = setup(t);
+  await ok(f, []);
+  const state = JSON.parse(f.read('state.json'));
+  writeJson(path.join(f.dir, 'state.json'), { ...state, version: 1 });
+  await refused(f, [], /state version changed/);
 });
