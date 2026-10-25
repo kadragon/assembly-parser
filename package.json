@@ -2,10 +2,11 @@
   "name": "assembly-parser",
   "version": "0.1.0",
   "private": true,
-  "description": "Collect National Assembly webcast AI subtitles and summarize them in 10-minute windows",
+  "description": "Local browser app that summarizes live National Assembly AI captions or uploaded JSONL, SRT, and WebVTT transcripts by time window and interest category",
   "type": "module",
   "scripts": {
     "start": "node src/app.js",
+    "demo": "node src/demo.js",
     "collect": "node src/collect.js",
     "summarize": "node src/summarize.js",
     "serve": "node src/serve.js",

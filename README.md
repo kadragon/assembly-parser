@@ -1,91 +1,162 @@
 # assembly-parser
 
-국회 의사중계(`assembly.webcast.go.kr`) 생중계의 AI 자막을 수집해 5분 구간마다
-요약하고, 내용을 주제별로 나눠 두 범주로 정리합니다. 범주는 관심 기관
-(예: 한국교원대학교)과 그외입니다.
+A local browser app that turns long spoken sessions into time-window summaries and
+topics grouped by your own interest categories. It has two inputs:
 
-## 사용법
+- **Live National Assembly broadcasts**: collects the AI captions of a live broadcast
+  on the National Assembly webcast (`assembly.webcast.go.kr`) while it runs.
+- **Meeting or lecture transcripts**: uploads a finished JSONL, SRT, or WebVTT file.
 
-### 준비
+Every window (5 minutes by default) gets a summary, and its content is routed into
+topics with cumulative summaries. Summaries are made by your local
+[Claude Code](https://claude.com/claude-code) CLI. The interface is in Korean.
 
-- Node.js 22 이상
-- [Claude Code](https://claude.com/claude-code) CLI(`claude`) 설치 및 로그인.
-  모든 요약은 `claude -p`로 실행됩니다.
+## Quick start
+
+Requirements: Node.js 22 or later, and for new summaries a Claude Code CLI (`claude`)
+that is installed and logged in.
 
 ```bash
 npm install
-```
-
-### 빠른 시작
-
-```bash
 npm start
 # Open the printed http://127.0.0.1:3000 address in your browser.
 # Optional: npm start -- --port 3100 --data /path/to/local/data
 ```
 
-Choose a meeting from the live broadcast list (fetched from the Assembly main-page
-feed, cached briefly; **Refresh** rechecks it) or paste an official Assembly player
-URL, define optional interest categories, and start collection and summarization
-together. Direct URL entry works even when the list cannot be loaded. Only
-currently live broadcasts with AI captions can start; this is rechecked at Start. The application binds to loopback; use the exact printed
-address because write requests require matching Host, Origin, and a session token.
-A busy port fails before any worker starts.
+Everything after `npm start` happens in the browser: choosing a broadcast or uploading
+a file, setting categories, starting, stopping, retrying, and rebuilding.
 
-Interest categories are optional; without them each window and topic is summarized
-as one overall category. Each category has a name, an optional description, and
-keyword chips (type a word, then Enter). Order sets the viewer's grouping; exactly
-one category is the fallback for anything that fits no other. Keywords only hint
-the router when they appear in a window; the description decides. **Load saved
-categories** copies another session's categories, and upload uses the same editor.
-**Edit settings** on a saved session changes its categories or window length
-without touching existing output: a summary-affecting change pauses summaries as
-stale until **Rebuild summary** archives the old output and summarizes again.
-A legacy focus setting appears as its two categories and is kept as-is unless edited.
+### Demo without credentials
 
-The home page lists saved sessions with separate collection and summary status.
-Closing a tab or navigating between sessions does not stop workers. **Stop** stops
-both workers for that session; **Retry summary** leaves collection running;
-**Finalize last window** processes the last partial window after collection stops.
-Server shutdown stops its owned workers and model processes. Restarting the server
-never resumes collection automatically. After finalizing a partial window, resume
-is refused until that window ends, so new captions cannot silently enter an already
-completed summary. **Resume collection** displays the missed
-interval: captions from that interval cannot be retrieved.
+```bash
+npm run demo        # optional: npm run demo -- --port 3100
+```
 
-Summary workers share one queue across browser sessions. Each worker retains the
-existing bounded model-call concurrency (up to four topic calls). The standalone
-CLI uses the same per-session writer locks. A second server cannot control the same
-data directory. Dead-process locks are recovered; unknown owners fail closed.
+This serves a precomputed session: a synthetic, roughly 17-minute library committee meeting
+([source](demo/source/library-committee.jsonl)) summarized in four windows with three
+categories. It needs no Claude login and no live broadcast. The demo runs on a
+temporary copy that is deleted on exit, so you can edit settings or rebuild without
+changing `demo/`; rebuilding or uploading in the demo does call Claude.
 
-Focus settings are saved per session. Summaries record the settings, model, prompt
-version, and caption fingerprints they were made from. Changed settings or captions
-corrected after summarization pause summaries as "다시 만들기 필요" while collection
-continues; nothing is overwritten until you choose "요약 다시 만들기", which moves the
-previous `state.json`, `topics/`, and `curation.jsonl` to `archive/<time>/` first.
-Legacy records without recorded settings remain viewable and are rebuilt on request.
+## Using the app
 
-**Upload a meeting or lecture**: under "회의·강의 자막 파일 올리기", choose an SRT
-(`.srt`), WebVTT (`.vtt`), or JSONL (`.jsonl`) transcript ([formats](docs/jsonl-format.md),
-UTF-8, up to 5 MB), a title, and a new session ID.
-The whole file is validated before the session appears; errors list their line
-numbers and an existing session ID is never overwritten. Uploaded sessions use the
-general profile: times are elapsed from the start of the recording (hours keep
-counting past 24), speakers appear only when the file labels them (JSONL `speaker`, WebVTT
-`<v Name>`), and no
-parliamentary titles are added. All windows, including the last partial one, are
-summarized once; there is no live collection to stop or resume. Fact checks and
-curation remain Assembly-only. Category editing is not included yet.
+### Live Assembly broadcasts
 
-Claude Code must be installed and authenticated for summarization. Although storage
-is local, transcript text is sent to Claude. Summary errors pause that session until an explicit retry and leave collection running;
-check the session error, fix CLI installation/authentication, then retry.
+Choose a meeting from the live broadcast list or paste an official Assembly player URL
+(`https://assembly.webcast.go.kr/main/player.asp?xcode=…&xcgcd=…`). The list comes from
+the Assembly main-page feed, is cached briefly, and **Refresh** rechecks it. Direct URL
+entry works even when the list cannot be loaded. Only broadcasts that are live and have
+AI captions can start; this is rechecked at Start.
 
-### 기존 독립 실행 명령
+Start launches collection and summarization together. Keep in mind:
 
-명령마다 터미널을 따로 열어 실행합니다. `collect`는 회의 생중계가 시작되기
-전에 띄워 두어야 합니다. 자막은 생중계 중에만 들어오고, 지난 자막은 받을 수
-없습니다.
+- Captions arrive only while the broadcast is live; past captions cannot be retrieved.
+  Start before the part you care about.
+- Closing the tab or switching sessions does not stop work. **Stop** stops both
+  workers for that session.
+- Restarting the server never resumes collection automatically. **Resume collection**
+  shows the missed interval, whose captions are lost.
+- **Finalize last window** summarizes the last partial window after collection stops.
+  Resume is then refused until that window ends, so new captions cannot slip into an
+  already completed summary.
+
+### Uploaded meetings and lectures
+
+Under "회의·강의 자막 파일 올리기", choose a file, a title, and a new session ID.
+
+| Format | Extension | Speakers | Notes |
+|---|---|---|---|
+| JSONL | `.jsonl` | optional `speaker` field | [contract](docs/jsonl-format.md) |
+| SRT | `.srt` | never (SRT has no speaker syntax) | formatting tags removed |
+| WebVTT | `.vtt` | `<v Name>` voice spans | cue settings, `NOTE`/`STYLE`/`REGION` ignored |
+
+Files must be UTF-8 and at most 5 MB. The whole file is validated before the session
+appears; errors list their line numbers, and an existing session ID is never
+overwritten. Times are elapsed from the start of the recording (hours keep counting
+past 24). Speakers are never inferred from text, and no parliamentary titles are added.
+All windows, including the last partial one, are summarized once; there is no live
+collection to stop or resume. See [the format notes](docs/jsonl-format.md#srt-and-webvtt)
+for exact parsing rules and exclusions.
+
+### Interest categories
+
+Categories are optional; without them everything is summarized as one overall category.
+Each category has a name, an optional description, and keyword chips (type a word, then
+Enter). Order sets the viewer's grouping, and exactly one category is the fallback for
+anything that fits no other. The description decides routing; keywords only hint the
+router when they appear in a window. **Load saved categories** copies another session's
+categories. A legacy focus setting appears as its two categories and is kept as is
+unless edited.
+
+### Settings changes and rebuilds
+
+**Edit settings** on a saved session changes its categories or window length without
+touching existing output. Summaries record the settings, model, prompt version, and
+caption fingerprints they were made from. A summary-affecting change, or captions
+corrected after their window was summarized, pauses summaries as "다시 만들기 필요"
+while collection continues. Nothing is overwritten until you choose "요약 다시
+만들기", which first moves the previous `state.json`, `topics/`, and `curation.jsonl`
+to `archive/<time>/`. Legacy records without recorded settings remain viewable and are
+rebuilt only on request.
+
+### Viewer
+
+- **Left column**: window summary cards, newest first, each with chips for the topics
+  it covered. New live captions appear in real time.
+- **Right column**: topics by category. Opening a topic shows its cumulative summary,
+  fact checks (when enabled), and per-window records.
+- **Filters**: select a speaker or organization to show only topics that mention it.
+  Filters survive a refresh; `Esc` clears them.
+- **Share as image**: window cards and open topics can be exported as PNG images with
+  the meeting information. Touch devices open the share sheet, desktops copy to the
+  clipboard, and otherwise the image is downloaded.
+
+## Privacy, model use, and external assets
+
+- Storage is local (`data/` by default), but **transcript text is sent to Anthropic**
+  through the Claude Code CLI for every summary. Do not upload material you may not send
+  to that service.
+- The server binds to `127.0.0.1`. Write requests require the exact printed address
+  (matching Host and Origin) and a per-run session token. It is not designed for hosting
+  or for access by other users.
+- The viewer loads the Pretendard web font and the `html-to-image` library (used for
+  share images) from the jsDelivr CDN. Without network access the viewer still works
+  with a fallback font, but image sharing does not.
+- Live collection and the broadcast list contact the Assembly webcast servers.
+  Uploaded sessions need no Assembly access; their only network use is the model calls.
+
+## Recovery
+
+- **Summary error**: the session pauses summaries and keeps collecting. Check the
+  session's error (often a missing `claude` CLI or an expired login), fix it, then
+  **Retry summary**. A window that fails three times is skipped so later windows are
+  not blocked; the next summary run retries it.
+- **Server stopped or crashed**: start it again. Sessions that were collecting show as
+  interrupted with their missed interval; resume them explicitly.
+- **Busy port**: `npm start` fails before starting any worker; choose another
+  `--port`.
+- **Locks**: one server controls a data directory, and the standalone commands use the
+  same per-session writer locks. Locks of dead processes are recovered; unknown owners
+  fail closed.
+
+## Limitations
+
+- Live input is only the Assembly webcast's AI captions. Broadcasts with
+  stenographer-only captions, or no captions, cannot start.
+- Captions missed while collection was stopped cannot be recovered.
+- No audio/video transcription, translation, or speaker diarization; uploads must
+  already be transcripts.
+- Fact checks and curation suggestions are Assembly-only and available only through
+  the standalone `summarize` command (below). Curation only records suggestions.
+- Summary quality depends on the model; the tests check orchestration with a fake
+  model runner, not summary quality.
+
+## Advanced usage
+
+### Standalone commands
+
+The original per-process commands remain available, each in its own terminal. Start
+`collect` before the broadcast reaches the part you need.
 
 ```bash
 URL='https://assembly.webcast.go.kr/main/player.asp?xcode=58&xcgcd=DCM00005822439A401&'
@@ -93,129 +164,113 @@ URL='https://assembly.webcast.go.kr/main/player.asp?xcode=58&xcgcd=DCM0000582243
 npm run collect -- "$URL"
 npm run summarize -- "$URL" --focus 한국교원대학교 --focus-keywords 교원대,교원대학교 \
   --focus-note "부설 장애인 체육 중·고등 특수학교(2028년 3월 개교 예정) 설립"
-npm run serve -- "$URL"            # http://localhost:3000 접속
+npm run serve -- "$URL"            # http://localhost:3000
 ```
 
-회의 내내 켜 두어야 하는 것은 `collect`뿐이고, `summarize`와 `serve`는 언제든
-다시 시작해도 됩니다. `summarize`와 `serve`에는 URL 대신 xcgcd
-(`DCM00005822439A401`)만 넘겨도 됩니다. 회의가 끝난 뒤
-`npm run summarize -- "$URL" --once --finalize`를 실행하면 마지막 부분 구간까지 처리하고 종료합니다.
+Only `collect` must keep running during the meeting; `summarize` and `serve` can be
+restarted at any time and also accept the bare `xcgcd` (`DCM00005822439A401`). After the
+meeting, `npm run summarize -- "$URL" --once --finalize` processes the last partial
+window and exits.
 
-### 명령
-
-| 명령 | 옵션 |
+| Command | Options |
 |---|---|
 | `start` | `--port <n>` (1–65535, default 3000), `--data <dir>` |
-| `collect <URL>` | `--data <dir>` (기본값 `data`) |
-| `summarize <URL\|xcgcd>` | 아래 옵션과 `--data <dir>` |
-| `serve <URL\|xcgcd>` | `--port <n>` (기본값 3000), `--data <dir>` |
+| `demo` | `--port <n>` (default 3000) |
+| `collect <URL>` | `--data <dir>` (default `data`) |
+| `summarize <URL\|xcgcd>` | the options below and `--data <dir>` |
+| `serve <URL\|xcgcd>` | `--port <n>` (default 3000), `--data <dir>` |
 
-#### summarize 옵션
+### `summarize` options
 
-- `--window <분>`: 구간 길이(기본값 5). 60의 약수로 지정합니다.
-- 생략한 옵션은 기존 요약에 저장된 설정을 그대로 씁니다. 지정한 값이 저장된
-  설정과 다르거나, 요약한 구간의 자막이 나중에 바뀌면 아무것도 고치지 않고
-  `rebuild required`와 이유를 출력한 뒤 종료 코드 3으로 끝납니다.
-- `--focus <기관명>`: 범주를 `<기관명>` / `그외`로 나눕니다. 지정하지 않으면
-  `전체` 하나입니다. `--focus-keywords`는 쉼표로 구분한 키워드 목록으로,
-  자막에 키워드가 나오면 라우터에 힌트로 전달됩니다(공백 무시, 기본값은 기관명).
-  `--focus-note`에는 기관명이 자막에 안 나와도 그 기관 소관으로 분류할 사업을
-  적습니다(예: `"부설 장애인 체육 중·고등 특수학교(2028년 3월 개교 예정) 설립"`).
-- `--categories '<JSON>'`: 여러 범주를 순서대로 지정합니다. 각 항목은
-  `{"name", "description", "keywords": [...], "fallback"}`이며 이름은 겹치지 않아야
-  하고 `fallback: true`인 나머지 범주가 정확히 하나 있어야 합니다. 키워드는 라우터
-  힌트일 뿐이며 분류는 설명을 보고 정합니다. `[]`는 범주 없음입니다.
-  `--focus` 계열과 함께 쓰면 거부합니다. 생략하면 저장된 범주를 쓰고, `--focus`를
-  지정하면 저장된 범주 대신 `<기관명>` / `그외`를 씁니다.
-- `--rebuild`: 저장된 자막으로 처음부터 다시 요약합니다. 기존 `state.json`,
-  `topics/`, `curation.jsonl`을 먼저 `archive/<시각>/`에 함께 보관하며,
-  `transcript.jsonl`은 그대로 둡니다. 프롬프트나 출력 형식을 바꿨다면
-  `src/summarizer.js`의 `PROMPT_VERSION`을 올려 기존 요약을 다시 만들게 하세요.
-- `--once`: 끝난 구간만 처리하고 종료합니다(예: 회의 종료 후).
-- `--finalize`: use with `--once` after stopping collection to include the last partial window.
-- `--factcheck`: 의원 발언 속 사실 주장을 웹으로 확인합니다(아래 참고).
-  웹 검색을 거치느라 주제당 15~30초쯤 걸려서 기본값은 꺼짐입니다.
-- `--curate`: 새 기록이 들어왔으면 30분마다 전체 주제 목록을 검토해 병합,
-  기록 이동, 제목 변경, 범주 수정 제안을 `curation.jsonl`에 남깁니다.
-  제안만 기록하고 주제는 바꾸지 않습니다.
-- `--factcheck`와 `--curate`는 국회 세션 전용입니다. 업로드한 회의·강의 세션에
-  쓰면 아무것도 쓰지 않고 종료합니다.
+- `--window <minutes>`: window length (default 5); must divide 60.
+- Omitted options reuse the settings saved with existing output. If a given value
+  differs from them, or captions of a summarized window change later, nothing is
+  modified: it prints `rebuild required` with the reasons and exits with code 3.
+- `--focus <organization>`: two categories, `<organization>` / `그외`. Without it there
+  is one overall category. `--focus-keywords` is a comma-separated keyword list passed
+  as router hints (default: the organization name). `--focus-note` describes work that
+  belongs to the organization even when its name is not spoken.
+- `--categories '<JSON>'`: ordered categories, each
+  `{"name", "description", "keywords": [...], "fallback"}`, with unique names and
+  exactly one `fallback: true`. `[]` means no categories. It cannot be combined with
+  the `--focus` options.
+- `--rebuild`: summarize again from the stored captions, archiving `state.json`,
+  `topics/`, and `curation.jsonl` to `archive/<time>/` first; `transcript.jsonl` is
+  kept. After changing prompts or the output shape, raise `PROMPT_VERSION` in
+  `src/summarizer.js` so existing summaries are reported as stale.
+- `--once`: process completed windows and exit.
+- `--finalize`: with `--once`, after collection has stopped, also process the last
+  partial window.
+- `--factcheck`: check factual claims in members' statements with web search (verdict,
+  explanation, sources per claim). Off by default because each topic takes about
+  15–30 seconds.
+- `--curate`: every 30 minutes with new records, review the topic list and record merge,
+  move, rename, and category suggestions in `curation.jsonl` without applying them.
+- `--factcheck` and `--curate` refuse uploaded sessions and exit without writing.
 
-#### 모델
+### Models
 
-| 환경변수 | 용도 | 기본값 |
+| Variable | Used for | Default |
 |---|---|---|
-| `SUMMARY_MODEL` | 구간 요약, 주제 분류, 주제 요약 | `haiku` |
+| `SUMMARY_MODEL` | window summaries, topic routing, topic summaries | `haiku` |
 | `FACTCHECK_MODEL` | `--factcheck` | `sonnet` |
 | `CURATE_MODEL` | `--curate` | `sonnet` |
 
-### 웹 화면
+Model calls run `claude -p` with tools disabled (web tools only for fact checks) and
+no saved sessions, with a timeout and at most four topic calls in parallel per
+session.
 
-- **왼쪽 열**: 구간 요약 카드가 최신순으로 쌓이고, 카드마다 그 구간에서 다룬
-  주제가 칩으로 붙습니다. 새 자막은 SSE로 실시간 표시됩니다.
-- **오른쪽 열**: 범주별 주제 목록. 주제를 열면 누적 요약, 팩트체크
-  (`--factcheck` 사용 시), 구간별 기록이 나옵니다. 이어지는 구간의 기록은
-  하나의 시간 범위로 합쳐 보여 줍니다.
-- **필터**: 의원이나 기관 표시를 누르면 그 대상이 나온 주제만 보입니다.
-  새로고침해도 유지되고, `Esc`로 해제합니다.
-- **이미지로 공유**: 구간 카드와 열린 주제에 있는 버튼으로, 회의 정보와
-  안내 문구를 넣은 PNG를 만듭니다. 터치 기기에서는 공유 시트를 열고,
-  데스크톱에서는 클립보드에 복사하며, 둘 다 안 되면 파일로 내려받습니다.
-- 상단에는 `summarize`가 실행 중인 Claude 호출이 표시됩니다.
+## How it works
 
-### 개발
+### Processes
+
+The browser app supervises the same workers that the standalone commands run, all
+sharing `data/<session>/`:
+
+| Worker | Reads | Writes |
+|---|---|---|
+| collector | Assembly AI caption WebSocket | `meeting.json`, `transcript.jsonl` (append-only) |
+| summarizer | `meeting.json`, `transcript.jsonl` | `state.json`, `topics/*.json` + `*.md`, `curation.jsonl` |
+| viewer | all of the above | nothing |
+
+### Window pipeline
+
+Windows are processed in order, because each uses the previous window and the topic
+list built so far:
+
+1. **Window summary**, using the previous window's summary as context.
+2. **Topic routing** (in parallel with 1): the router receives the topic list, the
+   previous window's items, and the captions, splits the window into items, and assigns
+   each to an existing topic or a new topic in a category (`claude -p --json-schema`).
+3. Each item becomes that topic's record for the window (`topics/tNNN.json`). Records
+   are append-only and replaced only when the same window is processed again.
+4. **Topic summaries**: topics with new records update their stored summary with just
+   the new records, so the whole meeting is never resent.
+5. **Fact checks** (`--factcheck`) run in a separate loop so they never delay 1–4.
+
+### Caption protocol
+
+`live_play.asp?xcode=…&xcgcd=…` returns the caption server address `xsami`
+(for example `wss://smiai.webcast.go.kr:8091/aistt/gyoyuk`). Like the site's
+`openos_util.js`, the collector connects to `${xsami}/hls` with the `echo-protocol`
+subprotocol. Frames carry `segment`, `segment-offset`, `transcript`, `transcripts`
+(diarized, with a `-` prefix marking a speaker change), and `final`. Only `final` frames
+are stored; a later `final` for the same segment replaces the earlier one when read.
+
+## Development
 
 ```bash
-npm test
-npm run lint      # Biome 린트·포맷 검사 (적용은 npm run lint:fix)
+npm test          # node --test; no Claude login or live broadcast needed
+npm run lint      # Biome lint and format check (npm run lint:fix applies fixes)
 ```
 
-## 동작 방식
+CI (`.github/workflows/checks.yml`) runs both on every push to `main` and on pull
+requests. The demo in `demo/sessions/` was produced by uploading
+`demo/source/library-committee.jsonl` through the app with the default model; the tests
+check that its transcript still matches that source.
 
-### 프로세스
+## License and publication
 
-독립된 세 프로세스가 `data/<xcgcd>/`를 함께 씁니다.
-
-| 프로세스 | 읽기 | 쓰기 |
-|---|---|---|
-| `collect` | AI 자막 WebSocket | `meeting.json`, `transcript.jsonl` (추가만 함) |
-| `summarize` | `meeting.json`, `transcript.jsonl` | `state.json`, `topics/*.json` + `topics/*.md`, `curation.jsonl` |
-| `serve` | 위 파일 전부 | 없음 (웹 화면 `/`, JSON `/api/state`, 새 자막 SSE `/api/live`) |
-
-### 구간 처리 순서
-
-구간이 끝날 때마다 다음 순서로 처리합니다.
-
-1. **구간 요약**: 왼쪽 열에 들어갈 요약. 직전 구간 요약을 맥락으로 씁니다.
-2. **주제 분류**(1과 병렬): 라우터는 주제 목록(id, 범주, 제목, 설명), 직전
-   구간의 항목, 자막을 받아 구간을 항목으로 나누고, 항목마다 기존 주제에 넣거나
-   범주를 정해 새 주제를 만듭니다. `claude -p --json-schema`로 실행합니다.
-3. 각 항목은 해당 주제의 그 구간 기록이 됩니다(`topics/tNNN.json`). 기록은
-   추가만 되고, 같은 구간을 다시 처리할 때만 교체됩니다.
-4. **주제 요약**: 새 기록이 생긴 주제는 저장된 요약에 새 기록만 더해 갱신합니다
-   (`summary.until`에 반영 시점 기록). 최대 4개를 병렬로 처리하며, 회의 전체를
-   다시 보내지 않습니다.
-5. **팩트체크**(`--factcheck`): 위 단계를 늦추지 않도록 별도 루프에서 돕니다.
-   의원이 발언한 새 기록이 있는 주제마다 확인 가능한 사실 주장(수치, 사건, 법령,
-   예산)을 3개까지 골라 웹에서 확인하고, 판정·설명·출처를 `topic.factcheck`에
-   저장합니다. `논쟁 중`인 주장은 입장별 견해와 출처를 따로 적습니다. 이전 확인
-   결과를 함께 넘겨 같은 주장을 두 번 확인하지 않습니다. 도구는
-   `WebSearch`/`WebFetch`만 씁니다.
-
-구간은 순서대로 처리합니다. 구간마다 직전 구간과 그때까지 만든 주제 목록을
-쓰기 때문입니다. 3번 실패한 구간은 뒤 구간이 막히지 않도록 건너뛰고,
-`summarize`를 다시 시작하면 재시도합니다.
-
-요약은 로컬 Claude Code CLI(`claude -p`, 도구 비활성, 세션 저장 안 함)로
-실행합니다. 실행 중인 호출은 `state.json`의 `running`에 summarize pid와 함께
-기록되므로, 프로세스가 강제 종료돼도 오래된 항목이 남지 않습니다.
-
-### 자막 프로토콜
-
-`live_play.asp?xcode=…&xcgcd=…`는 자막 서버 주소 `xsami`를 돌려줍니다
-(예: `wss://smiai.webcast.go.kr:8091/aistt/gyoyuk`). 수집기는 사이트의
-`openos_util.js`와 같은 방식으로 `${xsami}/hls`에 서브프로토콜
-`echo-protocol`로 접속합니다. 프레임에는 `segment`, `segment-offset`,
-`transcript`, `transcripts`(화자 분리, `-` 접두어는 화자 바뀜), `final`이
-들어 있습니다. `final`인 프레임만 저장하고, 같은 segment의 `final`이 나중에
-다시 오면 읽을 때 이전 것을 대체합니다.
+No license has been selected yet, so no reuse rights are granted beyond what applicable
+law allows. Choosing a license and any further release or redistribution are separate
+decisions from this documentation.

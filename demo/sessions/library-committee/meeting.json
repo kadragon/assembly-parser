@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "source": "upload",
+  "format": "assembly-parser.transcript",
+  "profile": "general",
+  "timeBasis": "elapsed",
+  "complete": true,
+  "title": "가람시립도서관 운영위원회 10월 정기회의 (합성 데모)",
+  "committee": "",
+  "subject": "가람시립도서관 운영위원회 10월 정기회의 (합성 데모)",
+  "date": "",
+  "importedAt": "2026-10-25T06:09:44.141Z",
+  "cues": 43,
+  "duration": 995000
+}

@@ -153,7 +153,6 @@ No task authorizes publishing the repository, selecting a license, or deploying 
 
 ## 7-public-release-preparation
 
-- [ ] [DOCS] Deliver a reproducible demo, CI, and public-facing setup documentation.
   - Source: [Approved design](docs/design/transcript-generalization.md), Prepare a
     reproducible local release; Testing Decisions; Out of Scope; delivery item 7.
   - Scope: Synthetic fixtures/precomputed demo, one-command quick start, supported

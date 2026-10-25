@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Run a credential-free demo and follow public setup docs (2026-10-25) → README.md
 - [done] Configure multiple interest categories in the browser with legacy focus compatibility (2026-10-25)
 - [done] Upload SRT and WebVTT subtitle files into the general-session workflow (2026-10-25) → docs/jsonl-format.md
 - [done] Upload general meeting or lecture JSONL and summarize it on elapsed time (2026-10-25) → docs/jsonl-format.md
