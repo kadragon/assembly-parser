@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process';
 
-const MODEL = process.env.SUMMARY_MODEL || 'haiku';
+export const MODEL = process.env.SUMMARY_MODEL || 'haiku';
+// bump when a prompt or output schema change makes earlier summaries incomparable
+export const PROMPT_VERSION = 1;
 const FACTCHECK_MODEL = process.env.FACTCHECK_MODEL || 'sonnet';
 // a hung CLI call would otherwise hold the summary loop forever
 const TIMEOUT_MS = 3 * 60_000;

@@ -79,6 +79,9 @@
   .chips { margin-top: 10px; }
   .status { margin: 8px 0 0; font-size: 13px; color: var(--accent); display: flex; align-items: center; gap: 8px; }
   .status[hidden] { display: none; }
+  .rebuild { margin: 10px 0 0; padding: 10px 14px; border-radius: 8px; font-size: 14px; color: var(--warn); background: var(--warn-bg); }
+  .rebuild[hidden] { display: none; }
+  .rebuild ul { margin: 4px 0 0; padding-left: 18px; }
   .spinner { width: 12px; height: 12px; border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; flex: none; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .pending { color: var(--muted); display: flex; align-items: center; gap: 8px; }
@@ -148,6 +151,7 @@
     <h1 id="subject">불러오는 중…</h1>
     <p><span id="committee"></span><span id="feed" class="feed stale">자막 없음</span></p>
     <p class="status" id="status" hidden><span class="spinner"></span><span id="status-text"></span></p>
+    <div class="rebuild" id="rebuild" role="status" hidden></div>
     <div class="filter" id="filter" hidden></div>
   </header>
 
@@ -274,6 +278,7 @@
     renderLive();
 
     renderStatus(s.running ?? []);
+    renderRebuild(s.rebuild);
     renderTopics(s);
     renderWindows(s);
     renderFilter(s);
@@ -286,6 +291,28 @@
     const elapsed = Math.round((Date.now() - Math.min(...running.map((r) => r.since))) / 1000);
     document.getElementById('status-text').textContent =
       `처리 중 (${running.length}건, ${elapsed}초째): ${running.map((r) => r.job).join(', ')}`;
+  }
+
+  // Output that no longer matches its captions stays visible but is never presented as current.
+  function renderRebuild(rebuild) {
+    const el = document.getElementById('rebuild');
+    const required = rebuild?.required ?? [];
+    el.hidden = !rebuild?.pending && !required.length;
+    if (el.hidden) return;
+    el.replaceChildren();
+    const lead = document.createElement('strong');
+    lead.textContent = rebuild.pending
+      ? '요약을 다시 만드는 중입니다. 이전 결과는 보관함에 있습니다.'
+      : '아래 요약은 현재 자막·설정과 맞지 않습니다. 세션 관리에서 요약을 다시 만들어 주세요.';
+    el.append(lead);
+    if (!required.length) return;
+    const list = document.createElement('ul');
+    for (const reason of required) {
+      const item = document.createElement('li');
+      item.textContent = reason;
+      list.append(item);
+    }
+    el.append(list);
   }
 
   // Topics: only titles are shown until one is selected; one open at a time.

@@ -12,6 +12,7 @@ const labels = {
   interrupted: '비정상 종료',
   error: '오류',
   complete: '마무리 완료',
+  stale: '다시 만들기 필요',
 };
 const time = (value) => new Date(value).toLocaleString('ko-KR');
 function el(tag, text, className) {
@@ -95,6 +96,24 @@ function render(sessions) {
       );
     for (const key of ['collectionError', 'summaryError'])
       if (session[key]) card.append(el('p', session[key], 'error'));
+    if (session.summary === 'stale')
+      card.append(
+        el(
+          'p',
+          `저장된 요약이 현재 자막이나 설정과 맞지 않아 요약을 멈췄습니다. 수집은 계속됩니다. 다시 만들면 이전 요약과 주제 기록은 보관함으로 옮겨집니다.\n${session.staleReasons ?? ''}`,
+          'notice',
+        ),
+      );
+    if (session.lastArchive)
+      card.append(el('p', `이전 요약 보관 위치: ${session.id}/${session.lastArchive}`, 'hint'));
+    if (!session.config)
+      card.append(
+        el(
+          'p',
+          '설정이 저장되지 않은 이전 기록입니다. 기록은 그대로 볼 수 있고, 다시 만들면 기존 요약 간격과 관심 기관을 사용합니다.',
+          'hint',
+        ),
+      );
     if (session.collection !== 'running' && session.config)
       card.append(
         el(
@@ -107,17 +126,21 @@ function render(sessions) {
     const link = el('a', '기록 열기 ↗');
     link.href = `/sessions/${encodeURIComponent(session.id)}/`;
     actions.append(link);
-    for (const [action, title] of session.collection === 'running'
-      ? [
-          ['stop', '중지'],
-          ['retry', '요약 재시도'],
-        ]
-      : [
-          ['resume', '수집 재개'],
-          ['retry', '요약 재시도'],
-          ['finalize', '마지막 구간 마무리'],
-        ]) {
-      if (!session.config && action !== 'stop') continue;
+    const rebuildable = session.summary === 'stale' || !session.config;
+    for (const [action, title] of [
+      ...(session.collection === 'running'
+        ? [
+            ['stop', '중지'],
+            ['retry', '요약 재시도'],
+          ]
+        : [
+            ['resume', '수집 재개'],
+            ['retry', '요약 재시도'],
+            ['finalize', '마지막 구간 마무리'],
+          ]),
+      ...(rebuildable ? [['rebuild', '요약 다시 만들기']] : []),
+    ]) {
+      if (!session.config && !['stop', 'rebuild'].includes(action)) continue;
       const button = el('button', title);
       button.type = 'button';
       button.addEventListener('click', () =>

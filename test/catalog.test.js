@@ -115,10 +115,15 @@ test('live list fetch uses only the fixed endpoint, rejects redirects, HTTP erro
     fetchLiveList({ fetchImpl: respond('{}', { headers: { 'Content-Length': '2000000' } }) }),
     /too large/,
   );
+  // AbortSignal.timeout does not keep the event loop alive on Node 22; a pending upstream does
   const hang = (_url, { signal }) =>
-    new Promise((_resolve, reject) =>
-      signal.addEventListener('abort', () => reject(signal.reason)),
-    );
+    new Promise((_resolve, reject) => {
+      const pending = setTimeout(() => {}, 60_000);
+      signal.addEventListener('abort', () => {
+        clearTimeout(pending);
+        reject(signal.reason);
+      });
+    });
   await assert.rejects(fetchLiveList({ fetchImpl: hang, timeout: 20 }), /timed out|TimeoutError/i);
 });
 

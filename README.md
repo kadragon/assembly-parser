@@ -47,10 +47,13 @@ existing bounded model-call concurrency (up to four topic calls). The standalone
 CLI uses the same per-session writer locks. A second server cannot control the same
 data directory. Dead-process locks are recovered; unknown owners fail closed.
 
-Focus settings are saved per session. Changing saved settings, or starting browser
-summarization for a legacy session that already has summaries, is refused until the
-explicit rebuild workflow is available. Legacy records remain viewable. Broadcast
-catalogs, uploads, and category editing are not included yet.
+Focus settings are saved per session. Summaries record the settings, model, prompt
+version, and caption fingerprints they were made from. Changed settings or captions
+corrected after summarization pause summaries as "다시 만들기 필요" while collection
+continues; nothing is overwritten until you choose "요약 다시 만들기", which moves the
+previous `state.json`, `topics/`, and `curation.jsonl` to `archive/<time>/` first.
+Legacy records without recorded settings remain viewable and are rebuilt on request.
+Uploads and category editing are not included yet.
 
 Claude Code must be installed and authenticated for summarization. Although storage
 is local, transcript text is sent to Claude. Summary errors pause that session until an explicit retry and leave collection running;
@@ -88,15 +91,18 @@ npm run serve -- "$URL"            # http://localhost:3000 접속
 #### summarize 옵션
 
 - `--window <분>`: 구간 길이(기본값 5). 60의 약수로 지정합니다.
+- 생략한 옵션은 기존 요약에 저장된 설정을 그대로 씁니다. 지정한 값이 저장된
+  설정과 다르거나, 요약한 구간의 자막이 나중에 바뀌면 아무것도 고치지 않고
+  `rebuild required`와 이유를 출력한 뒤 종료 코드 3으로 끝납니다.
 - `--focus <기관명>`: 범주를 `<기관명>` / `그외`로 나눕니다. 지정하지 않으면
   `전체` 하나입니다. `--focus-keywords`는 쉼표로 구분한 키워드 목록으로,
   자막에 키워드가 나오면 라우터에 힌트로 전달됩니다(공백 무시, 기본값은 기관명).
   `--focus-note`에는 기관명이 자막에 안 나와도 그 기관 소관으로 분류할 사업을
   적습니다(예: `"부설 장애인 체육 중·고등 특수학교(2028년 3월 개교 예정) 설립"`).
-- `--rebuild`: 저장된 자막으로 처음부터 다시 요약합니다(`src/summarizer.js`의
-  프롬프트를 고친 뒤 사용). 기존 주제는 삭제하지 않고
-  `topics-archived-<시각>/`으로 옮깁니다. `--window`나 범주를 바꿔도 같은
-  처리가 일어납니다.
+- `--rebuild`: 저장된 자막으로 처음부터 다시 요약합니다. 기존 `state.json`,
+  `topics/`, `curation.jsonl`을 먼저 `archive/<시각>/`에 함께 보관하며,
+  `transcript.jsonl`은 그대로 둡니다. 프롬프트나 출력 형식을 바꿨다면
+  `src/summarizer.js`의 `PROMPT_VERSION`을 올려 기존 요약을 다시 만들게 하세요.
 - `--once`: 끝난 구간만 처리하고 종료합니다(예: 회의 종료 후).
 - `--finalize`: use with `--once` after stopping collection to include the last partial window.
 - `--factcheck`: 의원 발언 속 사실 주장을 웹으로 확인합니다(아래 참고).
