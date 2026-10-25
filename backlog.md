@@ -185,3 +185,7 @@ No task authorizes publishing the repository, selecting a license, or deploying 
 ### PR #3 — Trustworthy rebuilds (2026-10-25)
 
 - [ ] [debt] Confirm against a live broadcast how late STT finals arrive after the 30s grace period; word changes or first captions landing after a window was summarized still pause live summaries until a full rebuild (source: code-review) — src/rebuild.js:86
+
+### PR #7 — Public release preparation (2026-10-25)
+
+- [ ] [debt] Name only the categories whose description or keywords changed in the stale reason; it currently lists every category, which reads as if all changed (source: walkthrough) — src/rebuild.js:103

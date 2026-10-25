@@ -5,6 +5,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { DEMO_SESSIONS, startDemo } from '../src/demo.js';
 import { parseJsonl } from '../src/importer.js';
+import { PROMPT_VERSION } from '../src/summarizer.js';
 
 const demoDir = fileURLToPath(new URL('../demo/', import.meta.url));
 const tree = (dir) =>
@@ -58,7 +59,8 @@ test('committed demo content is synthetic and free of runtime artifacts', () => 
   const files = tree(demoDir);
   const names = files.map(([name]) => name);
   assert.ok(names.includes(path.join('source', 'library-committee.jsonl')));
-  for (const [name, content] of files) {
+  for (const [file, content] of files) {
+    const name = file.split(path.sep).join('/');
     assert.doesNotMatch(name, /(^|\/)(\.|archive\/)|\.(log|lock)$/, name);
     assert.doesNotMatch(content, /\/Users\/|\/home\/|\/private\/|\/tmp\/|[A-Z]:\\/, name);
     assert.doesNotMatch(content, /"pid"\s*:/, name);
@@ -68,6 +70,8 @@ test('committed demo content is synthetic and free of runtime artifacts', () => 
     fs.readFileSync(path.join(DEMO_SESSIONS, 'library-committee', 'state.json'), 'utf8'),
   );
   assert.equal(state.running, undefined);
+  // a prompt change makes saved output stale: regenerate the demo when PROMPT_VERSION moves
+  assert.equal(state.settings.promptVersion, PROMPT_VERSION);
   // the precomputed session was summarized from the committed synthetic source
   const source = parseJsonl(
     fs.readFileSync(path.join(demoDir, 'source', 'library-committee.jsonl'), 'utf8'),

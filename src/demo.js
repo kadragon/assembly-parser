@@ -21,8 +21,11 @@ export async function startDemo(options = {}) {
       ...app,
       root,
       close: async () => {
-        await close();
-        fs.rmSync(root, { recursive: true, force: true });
+        try {
+          await close();
+        } finally {
+          fs.rmSync(root, { recursive: true, force: true });
+        }
       },
     };
   } catch (error) {
@@ -46,8 +49,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         },
       );
     };
-    process.on('SIGTERM', shutdown);
-    process.on('SIGINT', shutdown);
+    // closing the terminal sends SIGHUP; the temporary copy must not outlive it either
+    for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, shutdown);
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;

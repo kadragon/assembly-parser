@@ -36,7 +36,9 @@ This serves a precomputed session: a synthetic, roughly 17-minute library commit
 ([source](demo/source/library-committee.jsonl)) summarized in four windows with three
 categories. It needs no Claude login and no live broadcast. The demo runs on a
 temporary copy that is deleted on exit, so you can edit settings or rebuild without
-changing `demo/`; rebuilding or uploading in the demo does call Claude.
+changing `demo/`. It is the full app: any summary action (rebuild, retry, finalize,
+upload) calls Claude, and the broadcast list still loads from the Assembly site
+(offline, it shows as unavailable).
 
 ## Using the app
 
@@ -131,8 +133,11 @@ rebuilt only on request.
   session's error (often a missing `claude` CLI or an expired login), fix it, then
   **Retry summary**. A window that fails three times is skipped so later windows are
   not blocked; the next summary run retries it.
-- **Server stopped or crashed**: start it again. Sessions that were collecting show as
-  interrupted with their missed interval; resume them explicitly.
+- **Server stopped or crashed**: a normal shutdown (Ctrl+C) stops its collectors,
+  summarizers, and running model processes. Start it again: sessions that were
+  collecting show as interrupted with their missed interval; resume them explicitly.
+- **Summary waiting**: summary workers share one queue across sessions, so one
+  session's summary may wait for another's to finish.
 - **Busy port**: `npm start` fails before starting any worker; choose another
   `--port`.
 - **Locks**: one server controls a data directory, and the standalone commands use the
