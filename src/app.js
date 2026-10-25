@@ -72,7 +72,7 @@ export async function startApp({
           result = await sessions.serial(() => sessions.start(body));
         else {
           const match =
-            /^\/api\/sessions\/([A-Za-z0-9_-]{1,100})\/(stop|resume|retry|finalize)$/.exec(
+            /^\/api\/sessions\/([A-Za-z0-9_-]{1,100})\/(stop|resume|retry|finalize|rebuild)$/.exec(
               url.pathname,
             );
           if (!match || !body || Array.isArray(body) || Object.keys(body).length)

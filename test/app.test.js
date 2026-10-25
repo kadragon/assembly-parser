@@ -37,7 +37,7 @@ async function fixture(t, options = {}) {
   );
   fs.writeFileSync(
     summary,
-    `const fs=require('node:fs'); const path=require('node:path'); const root=process.argv[process.argv.indexOf('--data')+1]; fs.appendFileSync(path.join(root,'workers.jsonl'),JSON.stringify({role:'summary',pid:process.pid,id:process.argv[2],args:process.argv})+'\\n'); if(fs.existsSync(path.join(root,'fail'))) { console.error('synthetic model failure'); process.exit(2); } setTimeout(()=>process.exit(0),200);`,
+    `const fs=require('node:fs'); const path=require('node:path'); const root=process.argv[process.argv.indexOf('--data')+1]; fs.appendFileSync(path.join(root,'workers.jsonl'),JSON.stringify({role:'summary',pid:process.pid,id:process.argv[2],args:process.argv})+'\\n'); if(fs.existsSync(path.join(root,'fail'))) { console.error('synthetic model failure'); process.exit(2); } if(process.argv.includes('--rebuild')) fs.writeFileSync(path.join(root,process.argv[2],'state.json'),JSON.stringify({windows:{},rebuiltFrom:'archive/synthetic'})); else if(fs.existsSync(path.join(root,'stale'))) { console.error('rebuild required:\\n- focus changed'); process.exit(3); } setTimeout(()=>process.exit(0),200);`,
   );
   const app = await startApp({
     root,
@@ -124,10 +124,6 @@ test('concurrent Start is idempotent, literal settings persist, and summaries qu
   const first = app.workers().find((w) => w.role === 'summary');
   assert.ok(first.args.includes(config.focus));
   assert.equal(alive(first.pid), false);
-  assert.equal(
-    (await app.post('/api/start', { url: player('one'), config: { focus: 'changed' } })).status,
-    400,
-  );
   const html = await (await fetch(`${app.origin}/sessions/one/`)).text();
   assert.match(html, /세션 관리/);
   assert.equal((await fetch(`${app.origin}/sessions/one/api/state`)).status, 200);
@@ -467,4 +463,64 @@ test('synchronous worker launch failure is persisted as error and releases acqui
   assert.match(app.sessions.load('one').state.collectionError, /synthetic launch/);
   assert.equal(fs.existsSync(path.join(app.root, 'one', '.collector.lock')), false);
   assert.equal(fs.existsSync(path.join(app.root, 'one', '.summarizer.lock')), false);
+});
+
+test('changed settings pause summaries as stale while collecting; rebuild passes explicit settings', async (t) => {
+  const app = await fixture(t);
+  await app.post('/api/start', {
+    url: player('one'),
+    config: { focus: '기관', focusNote: '사업' },
+  });
+  await until(() => app.sessions.load('one').state.summary === 'idle');
+  fs.writeFileSync(path.join(app.root, 'stale'), '');
+  const changed = await app.post('/api/start', {
+    url: player('one'),
+    config: { focus: '다른 기관' },
+  });
+  assert.equal(changed.status, 200);
+  await until(() => app.sessions.load('one').state.summary === 'stale');
+  const entry = app.sessions.load('one');
+  assert.equal(entry.state.collection, 'running');
+  assert.match(entry.state.staleReasons, /focus changed/);
+  const args = app.workers().at(-1).args;
+  assert.deepEqual(args.slice(args.indexOf('--focus'), args.indexOf('--focus') + 6), [
+    '--focus',
+    '다른 기관',
+    '--focus-keywords',
+    '',
+    '--focus-note',
+    '',
+  ]);
+  const sessions = (await (await fetch(`${app.origin}/api/sessions`)).json()).sessions;
+  assert.equal(sessions[0].summary, 'stale');
+  assert.equal((await app.post('/api/sessions/one/rebuild')).status, 200);
+  await until(() => app.sessions.load('one').state.summary === 'idle');
+  assert.ok(app.workers().at(-1).args.includes('--rebuild'));
+  assert.equal(entry.state.lastArchive, 'archive/synthetic');
+  assert.equal(entry.state.staleReasons, undefined);
+  assert.equal(entry.state.collection, 'running');
+});
+
+test('legacy sessions without saved settings rebuild with their recorded window and focus', async (t) => {
+  const app = await fixture(t);
+  const dir = path.join(app.root, 'legacy');
+  fs.mkdirSync(dir);
+  writeJson(path.join(dir, 'meeting.json'), metadata({ xcode: '58', xcgcd: 'legacy' }));
+  writeJson(path.join(dir, 'state.json'), {
+    windowMinutes: 10,
+    categories: ['기관', '그외'],
+    windows: {},
+    finalizedThrough: 1,
+  });
+  assert.equal((await app.post('/api/sessions/legacy/retry')).status, 400);
+  assert.equal((await app.post('/api/sessions/legacy/rebuild')).status, 200);
+  await until(() => app.sessions.load('legacy').state.summary === 'complete');
+  const args = app.workers().at(-1).args;
+  for (const [flag, value] of [
+    ['--window', '10'],
+    ['--focus', '기관'],
+  ])
+    assert.equal(args[args.indexOf(flag) + 1], value);
+  assert.ok(args.includes('--rebuild') && args.includes('--finalize'));
+  assert.equal(app.sessions.load('legacy').config.windowMinutes, 10);
 });

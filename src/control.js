@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { aiSubtitleUrl, fetchMeeting, parsePlayerUrl } from './meeting.js';
 import { acquireLock } from './ownership.js';
+import { STALE_EXIT, savedSettings } from './rebuild.js';
 import { files, meetingDir, readJson, writeJson } from './store.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -128,11 +129,16 @@ export class Sessions {
     const config = validateConfig(input.config);
     const dir = this.dir(ids.xcgcd);
     const existing = fs.existsSync(files(dir).meeting) ? this.load(ids.xcgcd) : null;
-    if (existing?.config && JSON.stringify(config) !== JSON.stringify(existing.config))
-      throw new Error('Saved settings differ; rebuilding is not available yet');
-    if (existing && !existing.config && fs.existsSync(files(dir).state))
-      throw new Error('Legacy summaries are read-only until rebuild support is available');
-    if (existing?.collector) return this.view(existing);
+    if (existing?.collector) {
+      // New settings never touch saved output: the next summary run reports it as stale
+      // and waits for an explicit rebuild while collection goes on.
+      if (JSON.stringify(config) !== JSON.stringify(existing.config)) {
+        existing.config = config;
+        this.save(existing);
+        this.enqueue(existing);
+      }
+      return this.view(existing);
+    }
     const meeting = await this.resolveMeeting(ids);
     if (
       meeting.xcode !== ids.xcode ||
@@ -218,7 +224,10 @@ export class Sessions {
         entry[role] = null;
         const field = role === 'collector' ? 'collection' : 'summary';
         if (child.stopping) entry.state[field] = 'stopped';
-        else if (error || code !== 0) {
+        else if (role === 'summarizer' && code === STALE_EXIT) {
+          entry.state.summary = 'stale';
+          entry.state.staleReasons = output.trim();
+        } else if (error || code !== 0) {
           entry.state[field] = 'error';
           entry.state[`${field}Error`] = error?.message ?? (output || `Worker exited ${code}`);
         } else
@@ -234,6 +243,10 @@ export class Sessions {
         }
         if (role === 'summarizer') {
           this.summary = null;
+          entry.rebuilding = false;
+          if (code !== STALE_EXIT) delete entry.state.staleReasons;
+          const rebuiltFrom = readJson(files(entry.dir).state)?.rebuiltFrom;
+          if (rebuiltFrom) entry.state.lastArchive = rebuiltFrom;
           if (!entry.collector) {
             entry.summaryRelease?.();
             entry.summaryRelease = null;
@@ -248,9 +261,10 @@ export class Sessions {
     });
     return child;
   }
-  enqueue(entry, finalizing = false) {
+  enqueue(entry, finalizing = false, rebuilding = false) {
     if (entry.stopping || entry.summarizer || this.pending.includes(entry) || this.closing) return;
     entry.finalizing = finalizing;
+    entry.rebuilding = rebuilding;
     entry.state.summary = 'queued';
     this.pending.push(entry);
     this.save(entry);
@@ -263,17 +277,23 @@ export class Sessions {
     try {
       entry.summaryRelease ??= acquireLock(entry.dir, 'summarizer');
       const c = entry.config;
-      const args = [entry.id, '--data', this.root, '--window', String(c.windowMinutes), '--once'];
-      if (c.focus)
-        args.push(
-          '--focus',
-          c.focus,
-          '--focus-keywords',
-          c.focusKeywords || c.focus,
-          '--focus-note',
-          c.focusNote,
-        );
+      // Every setting is explicit, so values saved with older output never fill a gap.
+      const args = [
+        entry.id,
+        '--data',
+        this.root,
+        '--window',
+        String(c.windowMinutes),
+        '--focus',
+        c.focus,
+        '--focus-keywords',
+        c.focusKeywords,
+        '--focus-note',
+        c.focusNote,
+        '--once',
+      ];
       if (entry.finalizing) args.push('--finalize');
+      if (entry.rebuilding) args.push('--rebuild');
       entry.state.summary = 'running';
       delete entry.state.summaryError;
       this.save(entry);
@@ -333,6 +353,19 @@ export class Sessions {
       } finally {
         entry.stopping = false;
       }
+    } else if (action === 'rebuild') {
+      if (entry.summarizer) throw new Error('A summary is running; rebuild after it finishes');
+      const previous = readJson(files(entry.dir).state);
+      if (!entry.config) {
+        // legacy sessions only imply their window size and focus
+        const legacy = savedSettings(previous);
+        entry.config = validateConfig(
+          legacy ? { windowMinutes: legacy.windowMinutes, focus: legacy.focus } : {},
+        );
+      }
+      this.pending = this.pending.filter((e) => e !== entry);
+      // a stopped session that had finished keeps its last partial window
+      this.enqueue(entry, !entry.collector && Boolean(previous?.finalizedThrough), true);
     } else if (action === 'retry' || action === 'finalize') {
       if (!entry.config) throw new Error('Legacy session cannot be reconfigured yet');
       if (action === 'finalize' && entry.collector)

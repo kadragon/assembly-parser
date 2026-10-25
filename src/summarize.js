@@ -4,12 +4,23 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { validateConfig } from './control.js';
 import { workerLock } from './ownership.js';
+import {
+  archiveOutput,
+  effectiveSettings,
+  fingerprint,
+  finishRebuild,
+  STALE_EXIT,
+  STATE_VERSION,
+  savedSettings,
+  staleReasons,
+} from './rebuild.js';
 import { files, meetingDir, readJson, readTranscript, writeJson } from './store.js';
 import {
   curateTopics,
   factCheckTopic,
+  MODEL,
+  PROMPT_VERSION,
   routeWindow,
   runningJobs,
   stopModelChildren,
@@ -18,7 +29,6 @@ import {
   watchJobs,
 } from './summarizer.js';
 import {
-  archiveTopics,
   canonicalInstitution,
   loadTopics,
   nextTopicId,
@@ -41,11 +51,12 @@ const { values, positionals } = parseArgs({
   allowPositionals: true,
   options: {
     data: { type: 'string', default: 'data' },
-    window: { type: 'string', default: '5' }, // minutes
+    // omitted settings keep the values saved with existing output
+    window: { type: 'string' }, // minutes, default 5
     focus: { type: 'string' }, // e.g. 한국교원대학교 — becomes the first topic category
     'focus-keywords': { type: 'string' }, // comma-separated, e.g. 교원대 — hints the router
     'focus-note': { type: 'string' }, // projects of the focus institution, e.g. 부설 장애인 체육 특수학교 설립
-    rebuild: { type: 'boolean', default: false }, // discard summaries (topics are archived, not deleted)
+    rebuild: { type: 'boolean', default: false }, // archive all derived output, then summarize from scratch
     finalize: { type: 'boolean', default: false },
     once: { type: 'boolean', default: false }, // process closed windows, then exit
     factcheck: { type: 'boolean', default: false }, // web-check members' factual claims (slow, uses web search)
@@ -67,10 +78,17 @@ if (!meeting) {
   process.exit(1);
 }
 
-const windowMinutes = validateConfig({ windowMinutes: Number(values.window) }).windowMinutes;
 if (values.finalize && !values.once) throw new Error('--finalize requires --once');
 const release = workerLock(dir, 'summarizer');
 process.on('exit', release);
+// everything below runs as the session's only summary writer
+const resumed = finishRebuild(dir);
+if (resumed) console.log(`completed interrupted rebuild; previous output in ${resumed}`);
+const settings = effectiveSettings(savedSettings(readJson(f.state)), values, {
+  model: MODEL,
+  promptVersion: PROMPT_VERSION,
+});
+const { windowMinutes, focus, focusKeywords, focusNote: savedNote } = settings;
 const shutdown = () => {
   stopModelChildren();
   release();
@@ -88,39 +106,37 @@ const graceMs = 30_000;
 const MAX_ATTEMPTS = 3;
 // topic curation looks at the whole meeting, so it runs rarely
 const CURATE_EVERY_MS = 30 * 60_000;
-const focus = values.focus?.trim() || null;
-const focusKeywords = focus
-  ? (values['focus-keywords'] ?? focus)
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean)
-  : [];
-const focusNote = (focus && values['focus-note']?.trim()) || null;
+const focusNote = savedNote || null;
 const categories = focus ? [focus, '그외'] : ['전체'];
 
-/** windows[start] = { start, end, lineCount, summary?, error?, routed?, routeError?, topics?: [topicId], skipped? } */
-const fresh = () => ({ windowMinutes, categories, windows: {} });
-let state = values.rebuild ? null : readJson(f.state);
-if (state && !state.categories && state.windowMinutes === windowMinutes) {
-  // pre-topic state: keep window summaries, drop the old single rolling summaries
-  state.categories = categories;
-  delete state.focus;
-  delete state.overall;
-  delete state.focusSummary;
-  for (const w of Object.values(state.windows)) {
-    delete w.focusChecked;
-    delete w.focusNotes;
-  }
+// Output is never silently reused or replaced: a mismatch exits until --rebuild is requested.
+class StaleError extends Error {}
+function exitIfStale(reasons) {
+  if (!reasons.length) return;
+  process.stderr.write(`rebuild required:\n${reasons.map((r) => `- ${r}`).join('\n')}\n`);
+  process.exit(STALE_EXIT);
 }
-if (
-  !state ||
-  state.windowMinutes !== windowMinutes ||
-  String(state.categories) !== String(categories)
-) {
-  if (state) console.log('window size or categories changed; rebuilding');
-  const archived = archiveTopics(dir);
-  if (archived) console.log(`previous topics moved to ${archived}`);
-  state = fresh();
+
+/**
+ * windows[start] = { start, end, lineCount, fingerprint, summary?, error?, routed?, routeError?,
+ *                    topics?: [topicId], skipped? }
+ */
+const fresh = (rebuiltFrom) => ({
+  version: STATE_VERSION,
+  settings,
+  windowMinutes,
+  categories,
+  ...(rebuiltFrom && { rebuiltFrom }),
+  windows: {},
+});
+let state = readJson(f.state);
+if (values.rebuild) {
+  const archived = archiveOutput(dir);
+  if (archived) console.log(`previous output archived to ${archived}`);
+  state = fresh(archived ?? resumed);
+} else {
+  exitIfStale(staleReasons(dir, state, settings, readTranscript(f.transcript)));
+  state ??= fresh(resumed);
 }
 const save = () => writeJson(f.state, state);
 // pid lets serve ignore a list left behind by a process that was killed mid-call
@@ -217,6 +233,8 @@ async function processWindow(transcript, start) {
   state.windows[start] ??= { start, end: start + windowMs };
   const w = state.windows[start];
   w.lineCount = lines.length;
+  // checked against the transcript before every tick; a later correction makes output stale
+  w.fingerprint = fingerprint(lines);
   const prev = state.windows[start - windowMs];
   const tasks = [];
 
@@ -366,6 +384,8 @@ const attempts = new Map();
 
 async function tick() {
   const transcript = readTranscript(f.transcript);
+  const reasons = staleReasons(dir, state, settings, transcript);
+  if (reasons.length) throw Object.assign(new StaleError('rebuild required'), { reasons });
   const starts = closedWindows(
     transcript.lines(),
     windowMs,
@@ -399,7 +419,12 @@ console.log(`categories: ${categories.join(' / ')}; topics in ${path.join(dir, '
 if (focusNote) console.log(`focus note: ${focusNote}`);
 
 if (values.once) {
-  await tick();
+  try {
+    await tick();
+  } catch (err) {
+    if (err instanceof StaleError) exitIfStale(err.reasons);
+    throw err;
+  }
   if (values.finalize) {
     state.finalizedThrough = Math.max(
       state.finalizedThrough ?? 0,
@@ -425,6 +450,8 @@ if (values.once) {
       try {
         await step();
       } catch (err) {
+        // collection goes on; summaries wait for an explicit rebuild
+        if (err instanceof StaleError) exitIfStale(err.reasons);
         console.error(`${name} step failed, retrying next tick: ${err.message}`);
       } finally {
         busy = false;

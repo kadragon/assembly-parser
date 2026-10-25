@@ -262,6 +262,7 @@ button:disabled {
   font-size: 12px;
 }
 .notice {
+  white-space: pre-line;
   background: #ece6d3;
   padding: 10px;
   font-size: 12px;
