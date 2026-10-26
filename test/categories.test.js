@@ -198,9 +198,10 @@ test('CLI precedence: omitted flags keep saved categories; explicit flags overri
   };
   // every summary-affecting edit needs a rebuild: description, keywords, order, fallback
   const edit = (fn) => fn(structuredClone(CATEGORIES));
+  // a details-only edit names just the edited category
   await refused(
     flag(edit((c) => Object.assign(c[0], { description: '다른 설명' }) && c)),
-    /categories changed/,
+    /categories changed: descriptions or keywords of 예산\n/,
   );
   await refused(flag(edit((c) => Object.assign(c[1], { keywords: ['채용'] }) && c)), /categories/);
   await refused(flag(edit((c) => [c[1], c[0], c[2]])), /categories/);

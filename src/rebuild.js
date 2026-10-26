@@ -92,16 +92,17 @@ const windowName = (dir, start) =>
     ? `${formatElapsed(start)} elapsed`
     : `${minute(start)} UTC`;
 
-// Category lists are long: name them, mark the fallback (*), and say when only details changed.
+// Category lists are long: name them, mark the fallback (*), and when only details changed,
+// name just the categories whose details did.
 const categoryNames = (list) =>
   list ? list.map((c) => `${c.name}${c.fallback ? '*' : ''}`).join(', ') : '(none)';
 const change = (key, from, to) => {
   if (key !== 'categories')
     return `${key} changed: ${JSON.stringify(from)} → ${JSON.stringify(to)}`;
   const [before, after] = [categoryNames(from), categoryNames(to)];
-  return before === after
-    ? `categories changed: descriptions or keywords of ${after}`
-    : `categories changed: ${before} → ${after}`;
+  if (before !== after) return `categories changed: ${before} → ${after}`;
+  const edited = to.filter((c, i) => JSON.stringify(c) !== JSON.stringify(from[i]));
+  return `categories changed: descriptions or keywords of ${categoryNames(edited)}`;
 };
 
 /** Why existing output no longer matches the requested settings or the transcript; [] if it does. */
