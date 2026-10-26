@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Mark caption-unsupported live entries from the live list xsami flag (2026-10-26) → README.md
 - [done] Name only edited categories in the stale reason (2026-10-26)
 - [done] Run a credential-free demo and follow public setup docs (2026-10-25) → README.md
 - [done] Configure multiple interest categories in the browser with legacy focus compatibility (2026-10-25)

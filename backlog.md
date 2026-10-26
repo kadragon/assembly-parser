@@ -178,10 +178,6 @@ No task authorizes publishing the repository, selecting a license, or deploying 
 
 ## Review Backlog
 
-### PR #2 — Live broadcast catalog (2026-10-25)
-
-- [ ] [debt] Use the live_list.asp `xsami` subtitle hint to mark caption-ineligible live entries in the catalog once its meaning is confirmed against a live broadcast; Start already revalidates (source: code-review) — src/catalog.js:37
-
 ### PR #3 — Trustworthy rebuilds (2026-10-25)
 
 - [ ] [debt] Confirm against a live broadcast how late STT finals arrive after the 30s grace period; word changes or first captions landing after a window was summarized still pause live summaries until a full rebuild (source: code-review) — src/rebuild.js:86
