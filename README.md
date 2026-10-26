@@ -262,6 +262,11 @@ subprotocol. Frames carry `segment`, `segment-offset`, `transcript`, `transcript
 (diarized, with a `-` prefix marking a speaker change), and `final`. Only `final` frames
 are stored; a later `final` for the same segment replaces the earlier one when read.
 
+The catalog's `live_list.asp` also carries an `xsami`, but there it is a per-channel flag,
+not an address: a live check on 2026-10-26 showed `'1'` on every committee channel and `'0'`
+only on the no-broadcast placeholder. The catalog marks a live entry with `'0'` as
+caption-unsupported but keeps it selectable; Start still asks `live_play.asp`.
+
 ## Development
 
 ```bash

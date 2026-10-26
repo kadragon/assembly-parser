@@ -37,6 +37,9 @@ export function normalizeLiveList(data) {
       const xcode = text(item.xcode);
       const xcgcd = text(item.xcgcd);
       const live = item.xstat === '1' || item.xstat === 1;
+      // A per-channel caption flag (observed live 2026-10-26: '1' on every committee channel,
+      // '0' on the no-broadcast placeholder). Only an explicit 0 is a hint; Start revalidates.
+      const captions = !(item.xsami === '0' || item.xsami === 0);
       // Like main.js, only a live entry with a meeting identifier links to a player.
       const url =
         live && ID.test(xcode) && ID.test(xcgcd)
@@ -49,6 +52,7 @@ export function normalizeLiveList(data) {
         subject: plain(item.xsubj),
         status: plain(item.xdesc),
         live,
+        captions,
         url,
       };
     });

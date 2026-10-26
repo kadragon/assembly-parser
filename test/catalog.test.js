@@ -29,6 +29,8 @@ test('live list normalization keeps committee, subject, status and only selectab
       entry({ xcode: '../x', xstat: '1', xcgcd: 'DCM1' }),
       entry({ xcode: '26', xstat: '1', xcgcd: 'a&b' }),
       'not an entry',
+      entry({ xcode: '37', xstat: '1', xcgcd: 'DCM37', xsami: '0' }),
+      entry({ xcode: '38', xstat: '1', xcgcd: 'DCM38', xsami: 0 }),
       null,
       { xcode: '91', xname: '특별위', xstat: '', xdesc: '생중계 없음' },
     ],
@@ -41,6 +43,7 @@ test('live list normalization keeps committee, subject, status and only selectab
     subject: '제1차 회의 & 질의',
     status: '교육위 개의',
     live: true,
+    captions: true,
     url: 'https://assembly.webcast.go.kr/main/player.asp?xcode=58&xcgcd=DCM0000158',
   });
   assert.deepEqual(parsePlayerUrl(list.broadcasts[0].url), { xcode: '58', xcgcd: 'DCM0000158' });
@@ -52,9 +55,13 @@ test('live list normalization keeps committee, subject, status and only selectab
   assert.equal(list.broadcasts[3].committee, '교육위');
   assert.equal(list.broadcasts[3].url, null);
   assert.equal(list.broadcasts[4].url, null);
-  assert.equal(list.broadcasts.length, 6);
-  assert.equal(list.broadcasts[5].committee, '특별위');
-  assert.equal(list.broadcasts[5].subject, '');
+  // xsami is a per-channel caption flag; only an explicit 0 marks an entry caption-ineligible.
+  assert.equal(list.broadcasts[5].captions, false);
+  assert.equal(list.broadcasts[6].captions, false);
+  assert.equal(list.broadcasts.length, 8);
+  assert.equal(list.broadcasts[7].committee, '특별위');
+  assert.equal(list.broadcasts[7].subject, '');
+  assert.equal(list.broadcasts[7].captions, true);
 });
 
 test('malformed live list responses are rejected instead of reported as empty', () => {

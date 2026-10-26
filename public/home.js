@@ -482,9 +482,11 @@ function renderCatalog() {
     const row = el('li');
     if (item.url && item.url === urlInput.value) row.className = 'selected';
     const info = el('div');
+    // The caption flag is a hint only: Start still checks the meeting's caption server.
+    const live = `생중계 · ${item.status}${item.captions === false ? ' · 자막 미지원으로 표시됨' : ''}`;
     info.append(
       el('strong', `${item.committee}${item.subject ? ` · ${item.subject}` : ''}`),
-      el('span', item.live ? `생중계 · ${item.status}` : item.status || '중계 대기', 'meta'),
+      el('span', item.live ? live : item.status || '중계 대기', 'meta'),
     );
     row.append(info);
     if (item.url) {
