@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Measure late live caption finals against the 30s grace from a recorded session (2026-11-01) → docs/live-caption-timing.md
 - [done] Mark caption-unsupported live entries from the live list xsami flag (2026-10-26) → README.md
 - [done] Name only edited categories in the stale reason (2026-10-26)
 - [done] Run a credential-free demo and follow public setup docs (2026-10-25) → README.md
