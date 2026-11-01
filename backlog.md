@@ -175,9 +175,3 @@ No task authorizes publishing the repository, selecting a license, or deploying 
     separate decisions; do not claim the repository has been published.
   - Dependencies: 2-live-broadcast-catalog, 5-subtitle-file-uploads,
     6-interest-category-editor, and their transitive prerequisites.
-
-## Review Backlog
-
-### PR #3 — Trustworthy rebuilds (2026-10-25)
-
-- [ ] [debt] Confirm against a live broadcast how late STT finals arrive after the 30s grace period; word changes or first captions landing after a window was summarized still pause live summaries until a full rebuild (source: code-review) — src/rebuild.js:86
