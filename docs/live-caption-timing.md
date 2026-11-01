@@ -18,17 +18,22 @@ No broadcast was live when this was checked (2026-11-01), so no new connection w
   When each arrived, the newest caption already in the file was at most 1.24 s ahead of
   the corrected segment.
 - The largest out-of-order arrival (a timestamp behind one already written) was 1.24 s.
-- Replaying the summarizer's close rule over the file produced 0 stale events for
-  1- and 5-minute windows at every grace from 0 to 300 s. The same replay reports 1 stale
-  event when a single late correction is appended to the file.
+- A replay of the stale rules (changed words in a closed window, or first captions in a window
+  older than the last closed one) produced 0 stale events for 1- and 5-minute windows at every
+  grace from 0 to 300 s. The replay's clock is the newest caption timestamp, not wall-clock
+  time, so it shows only that no correction or first caption landed after a later caption
+  had passed the grace. Appending one late correction, or a first caption for an earlier
+  empty window, makes it report 1 event.
 
-The 30 s grace is therefore well above every lateness this recording can bound.
+While captions keep coming, every lateness this recording can bound is far inside 30 s.
 
 ## Residual risk
 
-- Arrival time is not recorded. Two of the 162 corrections were followed by more than 30 s of
-  silence, so their arrival is bounded only by the next segment; a correction sent late into a
-  pause would still pause summaries.
+- Arrival time is not recorded, and the summarizer closes windows by wall-clock time
+  (`Date.now()`), which keeps advancing through silence. A correction or first caption that
+  arrives more than 30 s after its window ends, during a pause, would still make the output
+  stale; this recording cannot rule that out. Two of the 162 corrections were followed by
+  more than 30 s of silence, so their arrival is bounded only by the next segment.
 - One session from one committee channel is the whole sample.
 
 A stale event is recoverable: collection keeps running, and the browser's rebuild archives the
@@ -75,8 +80,10 @@ console.log(
     `next segment >30 s later for ${refinals.filter((x) => x.next > 30_000).length}`,
 );
 
-// Replay the summarizer's rule: a window closes once the newest timestamp passes its end plus
-// grace; any later change to a closed window's lines (key + words) is a stale event.
+// Replay the stale rules of staleReasons() with the newest caption timestamp as the clock
+// (wall-clock time is not recorded): a window closes once that clock passes its end plus grace.
+// A later change to a closed window's lines (key + words), or a first caption in a window
+// older than the last closed one, is a stale event.
 function staleEvents(windowMs, graceMs) {
   const start = (ts) => Math.floor(ts / windowMs) * windowMs;
   const lines = new Map();
@@ -88,19 +95,24 @@ function staleEvents(windowMs, graceMs) {
       .sort()
       .join('\n');
   let now = -Infinity;
+  let lastClosed = -Infinity;
   let events = 0;
   for (const r of recs) {
     now = Math.max(now, r.ts);
     const ts = lines.get(r.key)?.ts ?? r.ts;
     lines.set(r.key, { ts, w: words(r.text) });
     const s = start(ts);
-    if (closed.has(s) && closed.get(s) !== print(s)) {
+    if (closed.has(s) ? closed.get(s) !== print(s) : s < lastClosed) {
       events++;
       closed.set(s, print(s));
     }
-    for (const v of lines.values())
-      if (!closed.has(start(v.ts)) && start(v.ts) + windowMs + graceMs <= now)
-        closed.set(start(v.ts), print(start(v.ts)));
+    for (const v of lines.values()) {
+      const vs = start(v.ts);
+      if (!closed.has(vs) && vs + windowMs + graceMs <= now) {
+        closed.set(vs, print(vs));
+        lastClosed = Math.max(lastClosed, vs);
+      }
+    }
   }
   return events;
 }
