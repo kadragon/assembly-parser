@@ -5,7 +5,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { snapshot } from './snapshot.js';
+import { snapshot, windowLines } from './snapshot.js';
 import { files, meetingDir } from './store.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -66,6 +66,18 @@ http
     if (req.url === '/api/state') {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify(snapshot(dir)));
+      return;
+    }
+    const caption = /^\/api\/window\/(\d{1,16})$/.exec(req.url);
+    if (caption) {
+      try {
+        const body = JSON.stringify(windowLines(dir, Number(caption[1])));
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(body);
+      } catch (error) {
+        res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ error: error.message }));
+      }
       return;
     }
     if (req.url === '/favicon.ico') {

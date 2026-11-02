@@ -109,6 +109,11 @@ rebuilt only on request.
   fact checks (when enabled), and per-window records.
 - **Filters**: select a speaker or organization to show only topics that mention it.
   Filters survive a refresh; `Esc` clears them.
+- **Source captions**: `원문 자막` on a window card expands that window's captions in
+  time order, one line per caption with its latest correction. Live sessions show the
+  caption's wall-clock time (KST) and uploads show elapsed time in the file; neither is a
+  video playback position. A warning appears when captions changed after the window was
+  summarized. The lookup reads local files only and calls no model.
 - **Share as image**: window cards and open topics can be exported as PNG images with
   the meeting information. Touch devices open the share sheet, desktops copy to the
   clipboard, and otherwise the image is downloaded.

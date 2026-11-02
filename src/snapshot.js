@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { alive } from './ownership.js';
 import { isElapsed, neutralTopic, profileOf } from './profile.js';
-import { rebuildPending, staleReasons } from './rebuild.js';
+import { fingerprint, rebuildPending, staleReasons } from './rebuild.js';
 import { files, readJson, readTranscript } from './store.js';
 import { loadTopics } from './topics.js';
 import { windowStart } from './transcript.js';
@@ -58,5 +58,24 @@ export function snapshot(dir) {
           end: current + windowMs,
           lines: transcript.between(current, current + windowMs),
         },
+  };
+}
+
+/**
+ * Source captions behind one summarized window, read-only: one line per segment with its latest
+ * final, in time order. `stale` means the captions changed after the window was summarized.
+ * Live sessions carry wall-clock time and uploads carry elapsed time; neither is a seek position.
+ */
+export function windowLines(dir, start) {
+  const f = files(dir);
+  const w = Number.isSafeInteger(start) ? readJson(f.state)?.windows?.[start] : undefined;
+  if (!w || w.start !== start) throw new Error('Unknown summary window');
+  const lines = readTranscript(f.transcript).between(w.start, w.end);
+  return {
+    start: w.start,
+    end: w.end,
+    timeBasis: isElapsed(readJson(f.meeting, {})) ? 'elapsed' : 'absolute',
+    stale: Boolean(w.fingerprint) && w.fingerprint !== fingerprint(lines),
+    lines,
   };
 }

@@ -515,3 +515,37 @@ test('legacy sessions without saved settings rebuild with their recorded window 
   assert.ok(args.includes('--rebuild') && args.includes('--finalize'));
   assert.equal(app.sessions.load('legacy').config.windowMinutes, 10);
 });
+
+test('a summary window serves its source captions read-only', async (t) => {
+  const app = await fixture(t);
+  const dir = path.join(app.root, 'past');
+  fs.mkdirSync(dir);
+  const start = Date.UTC(2026, 0, 1, 1, 0, 0);
+  writeJson(path.join(dir, 'meeting.json'), metadata({ xcode: '58', xcgcd: 'past' }));
+  writeJson(path.join(dir, 'state.json'), {
+    windowMinutes: 5,
+    windows: { [start]: { start, end: start + 300_000, fingerprint: 'outdated' } },
+  });
+  fs.writeFileSync(
+    path.join(dir, 'transcript.jsonl'),
+    `${JSON.stringify({ key: 's:0', ts: start + 1000, text: '원문' })}\n`,
+  );
+  const res = await fetch(`${app.origin}/sessions/past/api/window/${start}`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.deepEqual(
+    body.lines.map((l) => l.text),
+    ['원문'],
+  );
+  assert.equal(body.stale, true);
+  assert.equal(body.timeBasis, 'absolute');
+  for (const url of [
+    `/sessions/past/api/window/${start + 1}`,
+    '/sessions/past/api/window/abc',
+    `/sessions/missing/api/window/${start}`,
+    `/sessions/..%2Fpast/api/window/${start}`,
+  ])
+    assert.notEqual((await fetch(`${app.origin}${url}`)).status, 200, url);
+  assert.deepEqual(app.workers(), []);
+  assert.equal(fs.existsSync(path.join(dir, 'session.json')), false);
+});
