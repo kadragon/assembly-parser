@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- [done] Expand a summary window's source captions with a stale warning (2026-11-02) → README.md
 - [done] Measure late live caption finals against the 30s grace from a recorded session (2026-11-01) → docs/live-caption-timing.md
 - [done] Mark caption-unsupported live entries from the live list xsami flag (2026-10-26) → README.md
 - [done] Name only edited categories in the stale reason (2026-10-26)

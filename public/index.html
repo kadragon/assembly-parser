@@ -122,6 +122,12 @@
   .share { float: right; font: inherit; font-size: 12px; line-height: 20px; color: var(--muted); background: none; border: 1px solid var(--line); border-radius: 6px; padding: 0 8px; margin-left: 8px; cursor: pointer; }
   .share:hover { color: var(--accent); border-color: var(--accent); }
   .share:disabled { opacity: .6; cursor: progress; }
+  .captions { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); font-size: 14px; }
+  .captions .basis { color: var(--muted); font-size: 12px; margin: 0 0 6px; }
+  .captions .rebuild { margin: 0 0 8px; }
+  .captions p.line { display: grid; grid-template-columns: 64px 1fr; gap: 10px; margin: 0 0 4px; }
+  .captions p.line.turn { border-top: 1px dashed var(--line); padding-top: 6px; margin-top: 8px; }
+  .captions time { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; padding-top: 2px; }
   .detail-actions { margin-top: 10px; overflow: hidden; }
   .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 10; background: var(--text); color: var(--bg); font-size: 14px; padding: 8px 14px; border-radius: 8px; box-shadow: 0 4px 16px rgb(0 0 0 / .2); }
   .toast[hidden] { display: none; }
@@ -185,6 +191,7 @@
     const m = Math.floor(ms / 60000);
     return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
   };
+  const elapsedHms = (ms) => `${elapsedHm(ms)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`;
   const hm = (t) => (elapsed ? elapsedHm(t) : fmt.format(t));
   const range = (s, e) => `${hm(s)}–${hm(e)}`;
   const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -306,6 +313,10 @@
     renderTopics(s);
     renderWindows(s);
     renderFilter(s);
+    if (captions.size) {
+      await Promise.all([...captions.keys()].map(loadCaptions));
+      if (lastState === s) renderWindows(s);
+    }
   }
 
   function renderStatus(running) {
@@ -539,13 +550,53 @@
       ? shown.map((w) => `
         <section class="card">
           ${w.summary ? `<button class="share" data-share="window" data-id="${w.start}">이미지로 공유</button>` : ''}
+          <button class="share" data-captions="${w.start}" aria-expanded="${captions.has(w.start)}">${captions.has(w.start) ? '원문 닫기' : '원문 자막'}</button>
           <span class="time">${range(w.start, w.end)}</span><span class="meta">자막 ${w.lineCount}줄</span>
           <div class="summary">${body(w)}</div>
           ${w.topics?.length ? `<div class="chips">${w.topics.map((id) => chip(w, id)).join('')}</div>` : ''}
+          ${captions.has(w.start) ? captionsHtml(captions.get(w.start)) : ''}
         </section>`).join('')
       : `<p class="empty">${filter ? '해당하는 구간이 없습니다.' : '구간이 끝나면 요약이 표시됩니다.'}</p>`;
   }
   const expanded = new Set();
+
+  // Source captions behind a past window, fetched on demand; nothing here calls a model.
+  // Live sessions show the caption's wall-clock time (KST), uploads the elapsed time in the file;
+  // neither is a playback position.
+  const captions = new Map();
+  function captionsHtml(c) {
+    if (c === 'loading') return '<div class="captions"><p class="pending"><span class="spinner"></span>자막 불러오는 중…</p></div>';
+    if (c.error) return `<div class="captions"><p class="error">원문 자막을 불러오지 못했습니다 (${esc(c.error)})</p></div>`;
+    const at = (ts) => (c.timeBasis === 'elapsed' ? elapsedHms(ts) : clock.format(ts));
+    const basis = c.timeBasis === 'elapsed' ? '파일 시작부터 경과 시간' : '자막 수신 시각 (KST), 영상 재생 위치가 아님';
+    const stale = c.stale ? '<p class="rebuild">이 요약 이후 자막이 수정되어 요약과 원문이 다를 수 있습니다.</p>' : '';
+    const rows = c.lines.flatMap((l) => l.text.split('\n').map((part, i) => {
+      const turn = /^-\s*/.test(part);
+      return `<p class="line${turn ? ' turn' : ''}"><time>${i === 0 ? at(l.ts) : ''}</time><span>${esc(part.replace(/^-\s*/, ''))}</span></p>`;
+    })).join('');
+    return `<div class="captions"><p class="basis">원문 자막 ${c.lines.length}개 · ${basis}</p>${stale}${rows || '<p class="empty">이 구간에는 자막이 없습니다.</p>'}</div>`;
+  }
+  async function toggleCaptions(start) {
+    if (captions.has(start)) {
+      captions.delete(start);
+      return renderWindows(lastState);
+    }
+    captions.set(start, 'loading');
+    renderWindows(lastState);
+    await loadCaptions(start);
+    renderWindows(lastState);
+  }
+  // also re-run for every open window on refresh, so later corrections and the stale warning show
+  async function loadCaptions(start) {
+    try {
+      const res = await fetch(`api/window/${start}`);
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error ?? res.status);
+      if (captions.has(start)) captions.set(start, body);
+    } catch (err) {
+      if (captions.has(start)) captions.set(start, { error: err.message });
+    }
+  }
 
   // Share as image: build a standalone card off screen, render it to PNG, then hand it
   // to the share sheet (touch devices) or the clipboard (desktop), else download it.
@@ -662,6 +713,8 @@
   });
 
   document.addEventListener('click', (e) => {
+    const cap = e.target.closest('[data-captions]');
+    if (cap) return toggleCaptions(Number(cap.dataset.captions));
     const sh = e.target.closest('[data-share]');
     if (sh) return shareImage(sh);
     const f = e.target.closest('[data-filter]');

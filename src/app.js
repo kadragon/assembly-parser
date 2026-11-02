@@ -9,7 +9,7 @@ import { createCatalog, fetchLiveList } from './catalog.js';
 import { Sessions, validatePort } from './control.js';
 import { MAX_UPLOAD_BYTES } from './importer.js';
 import { acquireLock } from './ownership.js';
-import { snapshot } from './snapshot.js';
+import { snapshot, windowLines } from './snapshot.js';
 
 const publicDir = fileURLToPath(new URL('../public/', import.meta.url));
 const json = (res, status, body) => {
@@ -101,6 +101,11 @@ export async function startApp({
         return json(res, 200, result);
       }
       if (req.method !== 'GET') return json(res, 405, { error: 'Method not allowed' });
+      const caption = /^\/sessions\/([A-Za-z0-9_-]{1,100})\/api\/window\/(\d{1,16})$/.exec(
+        url.pathname,
+      );
+      if (caption)
+        return json(res, 200, windowLines(sessions.load(caption[1]).dir, Number(caption[2])));
       const match = /^\/sessions\/([A-Za-z0-9_-]{1,100})\/(api\/(state|live))?$/.exec(url.pathname);
       if (match) {
         const entry = sessions.load(match[1]);
