@@ -313,6 +313,10 @@
     renderTopics(s);
     renderWindows(s);
     renderFilter(s);
+    if (captions.size) {
+      await Promise.all([...captions.keys()].map(loadCaptions));
+      if (lastState === s) renderWindows(s);
+    }
   }
 
   function renderStatus(running) {
@@ -579,6 +583,11 @@
     }
     captions.set(start, 'loading');
     renderWindows(lastState);
+    await loadCaptions(start);
+    renderWindows(lastState);
+  }
+  // also re-run for every open window on refresh, so later corrections and the stale warning show
+  async function loadCaptions(start) {
     try {
       const res = await fetch(`api/window/${start}`);
       const body = await res.json();
@@ -587,7 +596,6 @@
     } catch (err) {
       if (captions.has(start)) captions.set(start, { error: err.message });
     }
-    renderWindows(lastState);
   }
 
   // Share as image: build a standalone card off screen, render it to PNG, then hand it
