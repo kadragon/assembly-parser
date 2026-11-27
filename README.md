@@ -274,6 +274,11 @@ caption-unsupported but keeps it selectable; Start still asks `live_play.asp`.
 
 ## Development
 
+Track queued work in [GitHub Issues labeled `task-queue`](https://github.com/kadragon/assembly-parser/issues?q=is%3Aissue+is%3Aopen+label%3Atask-queue).
+Preserve existing Assembly commands and session data. Run both checks for every
+implementation change and record any live broadcast, real model, or browser checks
+that were skipped.
+
 ```bash
 npm test          # node --test; no Claude login or live broadcast needed
 npm run lint      # Biome lint and format check (npm run lint:fix applies fixes)
@@ -287,5 +292,5 @@ check that its transcript still matches that source.
 ## License and publication
 
 No license has been selected yet, so no reuse rights are granted beyond what applicable
-law allows. Choosing a license and any further release or redistribution are separate
-decisions from this documentation.
+law allows. License selection, further publication or redistribution, and service
+deployment each require separate approval.
